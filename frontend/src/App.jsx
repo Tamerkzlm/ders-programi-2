@@ -1,5 +1,6 @@
 // frontend/src/App.jsx
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import AppLayout from './components/layout/AppLayout'; 
 import ModuleHub from './pages/ModuleHub';
 import KelebekPlanner from './pages/KelebekPlanner';
@@ -19,8 +20,10 @@ import MobileTeacherView from './pages/MobileTeacherView';
 
 export default function App() {
   return (
-    <Router>
-      <Routes>
+    <ErrorBoundary>
+      <Router>
+        <Routes>
+
         {/* 🌟 1. ANA AÇILIŞ PORTALI (4 Büyük Modül: Ders Programı, DYK, Kelebek, Sınav) */}
         <Route path="/" element={<ModuleHub />} />
 
@@ -63,5 +66,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
-  );
+  </ErrorBoundary>
+);
 }

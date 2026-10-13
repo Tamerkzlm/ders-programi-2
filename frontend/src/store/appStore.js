@@ -1268,7 +1268,29 @@ export const useAppStore = create(
 
     }),
     {
-      name: 'hz-ayse-timetable-v1' // Gerçek okul atama veritabanı mühürlendi
+      name: 'hz-ayse-timetable-v1',
+      // 🛡️ 5MB localStorage kota patlamasını (QuotaExceededError) önleyen filtre:
+      // Sadece kalıcı veritabanı alanları saklanır; anlık ve geçici veriler filtrelenir.
+      partialize: (state) => ({
+        demoDataChoice: state.demoDataChoice,
+        settings: state.settings,
+        teachers: state.teachers,
+        classrooms: state.classrooms,
+        timetable: state.timetable,
+        softPrefs: state.softPrefs,
+        hardPrefs: state.hardPrefs,
+        pinnedSlots: state.pinnedSlots,
+        dykSettings: state.dykSettings,
+        dykGroups: state.dykGroups,
+        dykAssignments: state.dykAssignments,
+        dykTeacherAvailabilities: state.dykTeacherAvailabilities,
+        dykSchedule: state.dykSchedule,
+        examSettings: state.examSettings,
+        examSubjectsByGrade: state.examSubjectsByGrade,
+        examSchedule: state.examSchedule,
+        examSupervisors: state.examSupervisors
+      })
     }
   )
 );
+
