@@ -51,9 +51,11 @@ export default function TimetableBoard() {
     togglePinSlot, 
     toggleTeacherSchedulePin,
     clearAllPins,
+    setPinnedSlots,
     generateResult,
     resetTimetable
   } = useAppStore();
+
   const navigate = useNavigate(); 
   const location = useLocation();
 
@@ -455,6 +457,24 @@ export default function TimetableBoard() {
     if (updatedTimetable[tgtClassId]?.[tgtDay]) {
       updatedTimetable[tgtClassId][tgtDay].sort((a, b) => a.period - b.period);
     }
+
+    // 📌 KİLİT SENKRONİZASYONU: Taşınan veya takas edilen hücrelerin kilit koordinatlarını güncelle
+    if (pinnedSlots && pinnedSlots.length > 0 && !source.fromPool && srcPeriod !== null) {
+      const srcPinIdx = pinnedSlots.findIndex(p => p.classId === srcClassId && p.day === srcDay && Number(p.period) === Number(srcPeriod));
+      const tgtPinIdx = pinnedSlots.findIndex(p => p.classId === tgtClassId && p.day === tgtDay && Number(p.period) === Number(tgtPeriod));
+
+      if (srcPinIdx !== -1 || tgtPinIdx !== -1) {
+        const nextPins = [...pinnedSlots];
+        if (srcPinIdx !== -1) {
+          nextPins[srcPinIdx] = { ...nextPins[srcPinIdx], classId: tgtClassId, day: tgtDay, period: tgtPeriod };
+        }
+        if (tgtPinIdx !== -1) {
+          nextPins[tgtPinIdx] = { ...nextPins[tgtPinIdx], classId: srcClassId, day: srcDay, period: srcPeriod };
+        }
+        setPinnedSlots(nextPins);
+      }
+    }
+
     applyTimetableChange(updatedTimetable);
   };
 
@@ -463,10 +483,20 @@ export default function TimetableBoard() {
     const updated = JSON.parse(JSON.stringify(timetable));
     if (updated[classId]?.[day]) {
       updated[classId][day] = updated[classId][day].filter(s => Number(s.period) !== Number(period));
+
+      // 📌 Silinen ders kilitli ise kilidi kaldır (boş hücre kilitli kalıp çözücüyü patlatmasın)
+      if (pinnedSlots && pinnedSlots.length > 0) {
+        const remainingPins = pinnedSlots.filter(p => !(p.classId === classId && p.day === day && Number(p.period) === Number(period)));
+        if (remainingPins.length !== pinnedSlots.length) {
+          setPinnedSlots(remainingPins);
+        }
+      }
+
       applyTimetableChange(updated);
       setAlertMsg("🗑️ Ders tablodan kaldırıldı ve havuza aktarıldı. İstediğiniz zaman havuza sürükleyebilir veya Geri Al (Ctrl+Z) yapabilirsiniz.");
     }
   };
+
 
   // Öğretmen için atanmamış (havuzda bekleyen) dersleri hesaplar
   const getPoolCoursesForTeacher = (teacherId) => {

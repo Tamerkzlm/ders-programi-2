@@ -406,17 +406,31 @@ export const solveSupervisors = ({
         }
         const examObj = grade ? examSchedule[grade]?.[day.date]?.[slot] : null;
 
-        // Aday öğretmenleri seç (en az görev alan öğretmenler en önde)
-        const candidates = [...teachers]
-          .filter(t => !busyTeachersInSession.has(t.id))
-          .sort((a, b) => {
-            // 1. Görev sayısı az olan öncelikli
-            if (teacherCounts[a.id] !== teacherCounts[b.id]) {
-              return teacherCounts[a.id] - teacherCounts[b.id];
-            }
-            // 2. Rastgelelik (rotasyon)
-            return Math.random() - 0.5;
-          });
+        // Aday öğretmenleri seç (okulda olmayan ve muaf öğretmenler elenir, en az görev alanlar öne alınır)
+        const isTeacherAvailableOnDay = (t) => {
+          if (!t) return false;
+          if (t.isExempt) return false; // Nöbet ve gözetmenlikten muaf
+          const closed = t.unavailable?.[day.dayName] || [];
+          if (closed.length >= 6) return false; // O gün boş günü (okulda değil)
+          return true;
+        };
+
+        let candidates = [...teachers]
+          .filter(t => !busyTeachersInSession.has(t.id) && isTeacherAvailableOnDay(t));
+
+        // Yedek durum: Eğer aday kalmadıysa (çok az öğretmen varsa) kısıtı esnet
+        if (candidates.length === 0) {
+          candidates = [...teachers].filter(t => !busyTeachersInSession.has(t.id));
+        }
+
+        candidates.sort((a, b) => {
+          // 1. Görev sayısı az olan öncelikli
+          if (teacherCounts[a.id] !== teacherCounts[b.id]) {
+            return teacherCounts[a.id] - teacherCounts[b.id];
+          }
+          // 2. Rastgelelik (rotasyon)
+          return Math.random() - 0.5;
+        });
 
         if (candidates.length === 0) return;
 

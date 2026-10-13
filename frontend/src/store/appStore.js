@@ -901,6 +901,7 @@ export const useAppStore = create(
       },
 
       clearAllPins: () => set({ pinnedSlots: [] }),
+      setPinnedSlots: (slots) => set({ pinnedSlots: Array.isArray(slots) ? slots : [] }),
 
       isGenerating: false,
       generateResult: null,

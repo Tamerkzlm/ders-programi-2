@@ -18,7 +18,7 @@ export default function Export() {
   const principalTitle = settings?.principalName ? `${settings.principalName}\nOkul Müdürü` : 'Okul Müdürü';
   const schoolTitle = settings?.schoolName || 'Hz. Ayşe Kız Anadolu İmam Hatip Lisesi';
 
-  // 📥 1. AKSİYON: TÜM VERİ TABANINI JSON OLARAK DIŞA AKTAR (YEDEKLE)
+  // 📥 1. AKSİYON: TÜM VERİ TABANINI JSON OLARAK DIŞA AKTAR (TAM SİSTEM YEDEĞİ)
   const handleExportBackup = () => {
     try {
       const backupData = {
@@ -26,24 +26,36 @@ export default function Export() {
         teachers: storeState.teachers,
         classrooms: storeState.classrooms,
         timetable: storeState.timetable,
+        pinnedSlots: storeState.pinnedSlots || [],
+        softPrefs: storeState.softPrefs,
+        hardPrefs: storeState.hardPrefs,
+        dykSettings: storeState.dykSettings,
+        dykGroups: storeState.dykGroups,
+        dykAssignments: storeState.dykAssignments,
+        dykTeacherAvailabilities: storeState.dykTeacherAvailabilities,
+        dykSchedule: storeState.dykSchedule,
+        examSettings: storeState.examSettings,
+        examSubjectsByGrade: storeState.examSubjectsByGrade,
+        examSchedule: storeState.examSchedule,
+        examSupervisors: storeState.examSupervisors,
         exportDate: new Date().toISOString(),
-        version: "1.0.0"
+        version: "2.0.0"
       };
 
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
       const downloadAnchor = document.createElement('a');
       
-      // Dosya adını kurumsal yapalım: okul-adi_tarih_yedek.json
+      // Dosya adını kurumsal yapalım: okul-adi_tarih_tam_yedek.json
       const cleanSchoolName = (settings?.schoolName || "okul").toLowerCase().replace(/[^a-z0-9]/g, "_");
       const today = new Date().toISOString().split('T')[0];
       
       downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `${cleanSchoolName}_ders_programi_${today}.json`);
+      downloadAnchor.setAttribute("download", `${cleanSchoolName}_tam_yedek_${today}.json`);
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
 
-      setBackupMessage({ type: 'success', text: 'Tüm sistem veritabanı başarıyla bilgisayarınıza yedeklendi.' });
+      setBackupMessage({ type: 'success', text: 'Tüm sistem veritabanı (kilitler, tercihler, DYK ve sınavlar dahil) başarıyla yedeklendi.' });
       setTimeout(() => setBackupMessage({ type: '', text: '' }), 4000);
     } catch {
       setBackupMessage({ type: 'error', text: 'Yedekleme dosyası oluşturulurken teknik bir hata oluştu.' });
@@ -56,7 +68,7 @@ export default function Export() {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (!window.confirm("Dikkat! Yedek dosyasını geri yüklediğinizde, şu an sistemde açık olan tüm öğretmen, sınıf ve ders ayarları silinecek ve yedekteki veriler yazılacaktır. Devam etmek istiyor musunuz?")) {
+    if (!window.confirm("Dikkat! Yedek dosyasını geri yüklediğinizde, şu an sistemde açık olan tüm öğretmen, sınıf, kural ve kilitli dersler silinecek ve yedekteki veriler yazılacaktır. Devam etmek istiyor musunuz?")) {
       e.target.value = ''; // Inputu temizle
       return;
     }
@@ -71,14 +83,29 @@ export default function Export() {
         }
 
         // Zustand Store'u canlı olarak yeni verilerle besliyoruz
-        useAppStore.setState({
+        const updatePayload = {
           settings: parsedData.settings,
           teachers: parsedData.teachers,
           classrooms: parsedData.classrooms,
-          timetable: parsedData.timetable || {}
-        });
+          timetable: parsedData.timetable || {},
+          pinnedSlots: parsedData.pinnedSlots || [],
+          ...(parsedData.softPrefs ? { softPrefs: parsedData.softPrefs } : {}),
+          ...(parsedData.hardPrefs ? { hardPrefs: parsedData.hardPrefs } : {}),
+          ...(parsedData.dykSettings ? { dykSettings: parsedData.dykSettings } : {}),
+          ...(parsedData.dykGroups ? { dykGroups: parsedData.dykGroups } : {}),
+          ...(parsedData.dykAssignments ? { dykAssignments: parsedData.dykAssignments } : {}),
+          ...(parsedData.dykTeacherAvailabilities ? { dykTeacherAvailabilities: parsedData.dykTeacherAvailabilities } : {}),
+          ...(parsedData.dykSchedule ? { dykSchedule: parsedData.dykSchedule } : {}),
+          ...(parsedData.examSettings ? { examSettings: parsedData.examSettings } : {}),
+          ...(parsedData.examSubjectsByGrade ? { examSubjectsByGrade: parsedData.examSubjectsByGrade } : {}),
+          ...(parsedData.examSchedule ? { examSchedule: parsedData.examSchedule } : {}),
+          ...(parsedData.examSupervisors ? { examSupervisors: parsedData.examSupervisors } : {}),
+          generateResult: null // Eski geçersiz analiz sonuçlarını temizle
+        };
 
-        setBackupMessage({ type: 'success', text: 'Yedek dosyası başarıyla çözüldü. Tüm okul veritabanı geri yüklendi!' });
+        useAppStore.setState(updatePayload);
+
+        setBackupMessage({ type: 'success', text: 'Yedek dosyası başarıyla çözüldü. Tüm okul veritabanı eksiksiz geri yüklendi!' });
         setTimeout(() => setBackupMessage({ type: '', text: '' }), 4000);
       } catch {
         setBackupMessage({ type: 'error', text: 'HATA: Seçtiğiniz dosya geçerli bir ders programı yedek dosyası değil!' });
