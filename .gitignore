@@ -1,0 +1,18 @@
+# Frontend (Node / Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.production.local
+
+# Backend (Python)
+backend/__pycache__/
+backend/*.pyc
+backend/.venv/
+backend/venv/
+
+# Environment and system files
+.DS_Store
+.vscode/
+*.log
+backend.zip
+proje_kodlari.txt
