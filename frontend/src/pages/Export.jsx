@@ -344,10 +344,12 @@ export default function Export() {
             <table className="w-full border-collapse border border-gray-500 text-[9px]">
               <thead>
                 <tr className="bg-gray-800 text-white font-bold">
-                  <th className="border border-gray-500 p-2 text-left">Sınıf / Gün</th>
+                  <th className="border border-gray-500 p-2 text-center w-16">Sınıf</th>
+                  <th className="border border-gray-500 p-2 text-center w-20">Gün</th>
                   {periodsArray.map(p => <th key={p} className="border border-gray-500 p-2 text-center">{p}. Ders</th>)}
                 </tr>
               </thead>
+
               <tbody>
                 {classrooms.map(c => (
                   <React.Fragment key={c.id}>
