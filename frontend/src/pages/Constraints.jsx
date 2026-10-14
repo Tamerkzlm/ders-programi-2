@@ -19,10 +19,11 @@ import {
   Zap,
   ArrowRight
 } from 'lucide-react';
+import CapacityHeatmap from '../components/common/CapacityHeatmap';
 
 export default function Constraints() {
   const navigate = useNavigate();
-  const { hardPrefs, setHardPrefs, softPrefs, updateSoftPrefs } = useAppStore();
+  const { hardPrefs, setHardPrefs, softPrefs, updateSoftPrefs, teachers, classrooms, settings } = useAppStore();
 
   // Sert ve yumuşak kısıtların yerel durumu
   const [hard, setHard] = useState({
@@ -208,6 +209,13 @@ export default function Constraints() {
           <span>Kurallar başarıyla kaydedildi.</span>
         </div>
       )}
+
+      {/* 📊 HAFTALIK OKUL KAPASİTE & DARBOĞAZ ISI HARİTASI */}
+      <CapacityHeatmap 
+        teachers={teachers} 
+        classrooms={classrooms} 
+        settings={settings} 
+      />
 
       {/* KATEGORİ FİLTRELEME SEKMELERİ */}
       <div className="flex bg-gray-100 p-1 rounded-2xl w-fit shadow-inner">

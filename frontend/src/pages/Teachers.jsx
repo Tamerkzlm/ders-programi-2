@@ -26,9 +26,12 @@ import {
   Lock,
   CalendarDays,
   RotateCcw,
-  RefreshCw
+  RefreshCw,
+  Waves,
+  Sun
 } from 'lucide-react';
 import AvailabilityGrid from '../components/AvailabilityGrid'; 
+import CapacityHeatmap from '../components/common/CapacityHeatmap';
 import { getCourseColorClass } from '../utils/courseColors';
 import DemoDataPromptModal from '../components/common/DemoDataPromptModal';
 import { generateCourseCode } from '../utils/courseCodeHelper';
@@ -64,6 +67,8 @@ export default function Teachers() {
   const [isAdministrator, setIsAdministrator] = useState(false);
   const [priorityFullDay, setPriorityFullDay] = useState('');
   const [fillLateHours, setFillLateHours] = useState(false);
+  const [freeDayPref, setFreeDayPref] = useState('none');
+  const [freeHalfPref, setFreeHalfPref] = useState('none');
   
   // Filtre durumları
   const [searchTerm, setSearchTerm] = useState('');
@@ -109,6 +114,7 @@ export default function Teachers() {
     let exemptCount = 0;
     let constrainedCount = 0;
     let adminCount = 0;
+    let floatingCount = 0;
 
     teachers.forEach(t => {
       const load = getTeacherLoad(t.id);
@@ -121,6 +127,10 @@ export default function Teachers() {
       
       const closedSlots = Object.values(t.unavailable || {}).reduce((acc, curr) => acc + (curr?.length || 0), 0);
       if (closedSlots > 0) constrainedCount++;
+
+      const fDay = t.floatingConstraints?.freeDayPreference;
+      const fHalf = t.floatingConstraints?.freeHalfDayPreference;
+      if ((fDay && fDay !== 'none') || (fHalf && fHalf !== 'none')) floatingCount++;
     });
 
     return {
@@ -129,6 +139,7 @@ export default function Teachers() {
       exemptCount,
       constrainedCount,
       adminCount,
+      floatingCount,
       averageLoad: teachers.length > 0 ? Math.round(totalAssignedHours / teachers.length) : 0
     };
   }, [teachers, classrooms, daysArray, numPeriods]);
@@ -166,6 +177,9 @@ export default function Teachers() {
       setIsAdministrator(teacher.isAdministrator || false);
       setPriorityFullDay(teacher.priorityFullDay || '');
       setFillLateHours(teacher.fillLateHours || false);
+      const floating = teacher.floatingConstraints || {};
+      setFreeDayPref(floating.freeDayPreference || 'none');
+      setFreeHalfPref(floating.freeHalfDayPreference || 'none');
     } else {
       setEditingTeacher(null);
       setName('');
@@ -175,6 +189,8 @@ export default function Teachers() {
       setIsAdministrator(false);
       setPriorityFullDay('');
       setFillLateHours(false);
+      setFreeDayPref('none');
+      setFreeHalfPref('none');
     }
     setSubjectSearchQuery('');
     setPropagateToPeers(false);
@@ -200,7 +216,11 @@ export default function Teachers() {
       isExempt,
       isAdministrator,
       priorityFullDay: priorityFullDay || null,
-      fillLateHours: Boolean(fillLateHours)
+      fillLateHours: Boolean(fillLateHours),
+      floatingConstraints: {
+        freeDayPreference: freeDayPref,
+        freeHalfDayPreference: freeHalfPref
+      }
     };
 
     if (editingTeacher) {
@@ -283,6 +303,11 @@ export default function Teachers() {
       }
       if (activeFilter === 'pinned') return isPinned;
       if (activeFilter === 'constrained') return closedSlots > 0;
+      if (activeFilter === 'floating') {
+        const fDay = t.floatingConstraints?.freeDayPreference;
+        const fHalf = t.floatingConstraints?.freeHalfDayPreference;
+        return (fDay && fDay !== 'none') || (fHalf && fHalf !== 'none');
+      }
 
       return true;
     });
@@ -478,6 +503,13 @@ export default function Teachers() {
         </div>
       </div>
 
+      {/* 📊 HAFTALIK OKUL KAPASİTE & DARBOĞAZ ISI HARİTASI */}
+      <CapacityHeatmap 
+        teachers={teachers} 
+        classrooms={classrooms} 
+        settings={settings} 
+      />
+
       {/* ARAMA VE GELİŞMİŞ FİLTRE ÇUBUĞU */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
         <div className="flex flex-col sm:flex-row gap-3">
@@ -516,6 +548,16 @@ export default function Teachers() {
             }`}
           >
             Tüm Kadro ({teachers.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveFilter('floating')}
+            className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+              activeFilter === 'floating' ? 'bg-cyan-700 text-white shadow-2xs' : 'bg-cyan-50 text-cyan-800 hover:bg-cyan-100 border border-cyan-200'
+            }`}
+          >
+            <Waves size={12} /> Kayan Tercihliler ({stats.floatingCount})
           </button>
 
           <button
@@ -645,6 +687,26 @@ export default function Teachers() {
                         {t.priorityFullDay && (
                           <span className="bg-indigo-100 text-indigo-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title={`${t.priorityFullDay} günü tam doldurulacak${t.fillLateHours ? ', son saatler kesin dolu olsun' : ''}`}>
                             <CalendarDays size={10} className="text-indigo-700" /> 📌 {t.priorityFullDay.slice(0, 3)} {t.fillLateHours ? 'Tam + Son Sa.' : 'Tam Dolu'}
+                          </span>
+                        )}
+                        {t.floatingConstraints?.freeDayPreference === 'floating_1_day' && (
+                          <span className="bg-cyan-100 text-cyan-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="Haftada 1 gün kayan boş gün (solver en uygun güne yerleştirir)">
+                            <Waves size={10} className="text-cyan-700" /> 1 Gün Kayan Boş
+                          </span>
+                        )}
+                        {t.floatingConstraints?.freeDayPreference === 'floating_2_days' && (
+                          <span className="bg-cyan-100 text-cyan-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="Haftada 2 gün kayan boş gün">
+                            <Waves size={10} className="text-cyan-700" /> 2 Gün Kayan Boş
+                          </span>
+                        )}
+                        {t.floatingConstraints?.freeHalfDayPreference === 'any_afternoon' && (
+                          <span className="bg-amber-100 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="Haftada 1 gün öğleden sonra serbest">
+                            <Sun size={10} className="text-amber-700" /> Kayan Öğleden Sonra
+                          </span>
+                        )}
+                        {t.floatingConstraints?.freeHalfDayPreference === 'any_morning' && (
+                          <span className="bg-sky-100 text-sky-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="Haftada 1 gün sabah serbest">
+                            <Sun size={10} className="text-sky-700" /> Kayan Sabah
                           </span>
                         )}
                       </div>
@@ -905,6 +967,45 @@ export default function Teachers() {
                 )}
               </div>
 
+              {/* 3. 🌊 ESNEK / KAYAN TERCİHLER ("Boş günüm ya da saatim fark etmez" diyen öğretmenler) */}
+              <div className="bg-cyan-50/60 border border-cyan-200/80 p-3.5 rounded-xl space-y-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-black text-cyan-950">
+                  <Waves size={14} className="text-cyan-700" />
+                  <span>Esnek / Kayan Tercihler ("Fark Etmez" Diyenler)</span>
+                </div>
+                <p className="text-[10px] text-cyan-800 leading-tight">
+                  Öğretmen belirli bir gün yerine esnek tercih belirttiğinde, yapay zeka boşluğu okulun en az yoğun olduğu güne yerleştirir ve darboğazı önler.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <div className="space-y-1">
+                    <label className="font-bold text-[10px] text-cyan-900 block">Kayan Boş Gün Tercihi:</label>
+                    <select
+                      value={freeDayPref}
+                      onChange={(e) => setFreeDayPref(e.target.value)}
+                      className="w-full bg-white border border-cyan-200 rounded-xl p-2 text-xs font-bold text-slate-800 outline-none focus:border-cyan-500 cursor-pointer"
+                    >
+                      <option value="none">Belirtilmedi (Standart Dağıtım)</option>
+                      <option value="floating_1_day">🌊 1 Gün Boş Olsun (Fark etmez)</option>
+                      <option value="floating_2_days">🌊 2 Gün Boş Olsun (Fark etmez)</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="font-bold text-[10px] text-cyan-900 block">Kayan Yarım Gün Tercihi:</label>
+                    <select
+                      value={freeHalfPref}
+                      onChange={(e) => setFreeHalfPref(e.target.value)}
+                      className="w-full bg-white border border-cyan-200 rounded-xl p-2 text-xs font-bold text-slate-800 outline-none focus:border-cyan-500 cursor-pointer"
+                    >
+                      <option value="none">Tercih Yok</option>
+                      <option value="any_afternoon">☀️ 1 Öğleden Sonra Boş (Fark etmez)</option>
+                      <option value="any_morning">🌅 1 Sabah Boş (Fark etmez)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               {/* 3. OKUL İDARECİSİ KUTUCUĞU */}
               <div className="bg-purple-50/60 border border-purple-200 p-3 rounded-xl flex items-start gap-2.5">
                 <input 
@@ -993,9 +1094,15 @@ export default function Teachers() {
               </button>
             </div>
 
-            <div className="bg-indigo-50/70 border-b border-indigo-100 px-4 py-2.5 text-[11px] text-indigo-900 flex items-center gap-2">
-              <span className="font-bold">💡 Bilgi:</span>
-              <span>Bu ekrandaki kutucuklar öğretmenin haftalık ders programı değil; derse giremeyeceği <strong>özel kapalı saatleridir (kısıtlar)</strong>. Program sıfırlansa dahi kısıtlar korunur; açmak için <strong>"Tümünü Aç"</strong> butonunu kullanabilirsiniz.</span>
+            <div className="bg-indigo-50/70 border-b border-indigo-100 px-4 py-2.5 text-[11px] text-indigo-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-bold">💡 Bilgi:</span>
+                <span>Bu ekrandaki kutucuklar öğretmenin derse giremeyeceği <strong>sert kapalı saatleridir (kısıtlar)</strong>.</span>
+              </div>
+              <div className="text-[10px] text-cyan-900 font-bold bg-cyan-100/80 px-2.5 py-1 rounded-lg border border-cyan-200 flex items-center gap-1.5 shrink-0">
+                <Waves size={12} className="text-cyan-700" />
+                <span>"Günü fark etmez" diyenler için tüm günü kapatmak yerine Düzenle &gt; Kayan Tercihler seçeneğini kullanın.</span>
+              </div>
             </div>
 
             <div className="p-5 space-y-4">

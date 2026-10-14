@@ -165,6 +165,11 @@ def teacher_profiles(teachers, activities, days, P, o):
             priority_full_day = None
         fill_late_hours = bool(get_val(t, "fillLateHours", False))
 
+        # 🌊 ESNEK / KAYAN TERCİHLER ("Boş günüm ya da saatim fark etmez" diyen öğretmenler)
+        floating = get_val(t, "floatingConstraints", {}) or {}
+        free_day_pref = floating.get("freeDayPreference", "none") if isinstance(floating, dict) else "none"
+        free_half_pref = floating.get("freeHalfDayPreference", "none") if isinstance(floating, dict) else "none"
+
         hard_cap = int(get_val(t, "maxPerDay", P))
         hard_cap = max(1, min(hard_cap, P))
 
@@ -183,6 +188,8 @@ def teacher_profiles(teachers, activities, days, P, o):
             "open_days": open_days,
             "priority_full_day": priority_full_day,
             "fill_late_hours": fill_late_hours,
+            "free_day_pref": free_day_pref,
+            "free_half_pref": free_half_pref,
         }
     return profiles, notes
 
@@ -212,7 +219,7 @@ def detect_workers():
 # --------------------------------------------------------------------------
 # Model
 # --------------------------------------------------------------------------
-def build_model(use_consecutive, activities, classrooms, teachers, days, P, profiles, o, pinned_slots=None):
+def build_model(use_consecutive, activities, classrooms, teachers, days, P, profiles, o, pinned_slots=None, allow_soft_floating=False, lunch_after=None):
     """
     Tek model kurar. Dönüş: (model, x, terms, warnings)
       x[a_id, gün, saat]  : aktivitenin o gün o saatte BAŞLAMASI
@@ -411,6 +418,69 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
                 extra_std = model.NewIntVar(0, num_days, f"edays_std_{t.id}")
                 model.Add(extra_std >= sum(has_by_day[d] for d in days) - min_days_std)
                 terms["gaps"].append(FREE_DAY_W * extra_std)
+
+        # 🌊 ESNEK / KAYAN TERCİHLER ("Boş günüm ya da saatim fark etmez" diyen öğretmenler)
+        f_day = prof.get("free_day_pref", "none")
+        if prof["weekly"] > 0:
+            if f_day == "floating_1_day":
+                target_days = max(1, num_days - 1)
+                if not allow_soft_floating and prof["weekly"] <= target_days * prof["hard_cap"]:
+                    # Sert Kısıt: Solver haftalık dersleri en fazla (num_days - 1) güne toplayıp 1 günü tamamen boş bırakır
+                    model.Add(sum(has_by_day[d] for d in days) <= target_days)
+                else:
+                    # Yumuşak Kısıt / Ceza: Hedeflenen gün sayısının üzerindeki her gün için ceza
+                    ex_f1 = model.NewIntVar(0, num_days, f"ex_f1_{t.id}")
+                    model.Add(ex_f1 >= sum(has_by_day[d] for d in days) - target_days)
+                    terms["rules"].append(150 * ex_f1)
+            elif f_day == "floating_2_days":
+                target_days = max(1, num_days - 2)
+                if not allow_soft_floating and prof["weekly"] <= target_days * prof["hard_cap"]:
+                    model.Add(sum(has_by_day[d] for d in days) <= target_days)
+                else:
+                    ex_f2 = model.NewIntVar(0, num_days, f"ex_f2_{t.id}")
+                    model.Add(ex_f2 >= sum(has_by_day[d] for d in days) - target_days)
+                    terms["rules"].append(150 * ex_f2)
+
+        # ☀️ Kayan Yarım Gün Tercihleri (Öğleden sonra veya sabah boşluğu)
+        f_half = prof.get("free_half_pref", "none")
+        if prof["weekly"] > 0 and f_half in ("any_afternoon", "any_morning") and P >= 4:
+            if f_half == "any_afternoon":
+                aft_cutoff = lunch_after if (lunch_after and 1 <= lunch_after < P) else math.ceil(P / 2)
+                aft_periods = [p for p in range(1, P + 1) if p > aft_cutoff]
+                aft_free_vars = []
+                for d in days:
+                    aft_busy = [busy_cells[d, p] for p in aft_periods if (d, p) in busy_cells and not isinstance(busy_cells[d, p], int)]
+                    if aft_busy:
+                        af = model.NewBoolVar(f"af_{t.id}_{d}")
+                        for b in aft_busy:
+                            model.AddImplication(af, b.Not())
+                        aft_free_vars.append(af)
+                    else:
+                        aft_free_vars.append(1)
+                
+                aft_sat = model.NewBoolVar(f"aft_sat_{t.id}")
+                model.Add(sum(aft_free_vars) >= 1).OnlyEnforceIf(aft_sat)
+                model.Add(sum(aft_free_vars) == 0).OnlyEnforceIf(aft_sat.Not())
+                terms["rules"].append(120 * (1 - aft_sat))
+
+            elif f_half == "any_morning":
+                morn_cutoff = lunch_after if (lunch_after and 1 <= lunch_after < P) else math.floor(P / 2)
+                morn_periods = [p for p in range(1, P + 1) if p <= morn_cutoff]
+                morn_free_vars = []
+                for d in days:
+                    morn_busy = [busy_cells[d, p] for p in morn_periods if (d, p) in busy_cells and not isinstance(busy_cells[d, p], int)]
+                    if morn_busy:
+                        mf = model.NewBoolVar(f"mf_{t.id}_{d}")
+                        for b in morn_busy:
+                            model.AddImplication(mf, b.Not())
+                        morn_free_vars.append(mf)
+                    else:
+                        morn_free_vars.append(1)
+                
+                morn_sat = model.NewBoolVar(f"morn_sat_{t.id}")
+                model.Add(sum(morn_free_vars) >= 1).OnlyEnforceIf(morn_sat)
+                model.Add(sum(morn_free_vars) == 0).OnlyEnforceIf(morn_sat.Not())
+                terms["rules"].append(120 * (1 - morn_sat))
 
     # ---- Öğretmen-sınıf bitişiklik / günlük yoğunluk kuralı
     if use_consecutive:
@@ -616,6 +686,14 @@ def audit(busy, teachers, profiles, days, o):
             for d in active:
                 if hours[d] < adaptive_min:
                     msgs.append(f"{t.name} – {d}: {hours[d]} saat (asgari {adaptive_min}).")
+
+        # Kayan gün tercihi denetimi
+        f_day = prof.get("free_day_pref", "none")
+        active_days = [d for d in days if hours[d] > 0]
+        if f_day == "floating_1_day" and len(active_days) > len(days) - 1:
+            msgs.append(f"{t.name}: 1 gün kayan boş gün tercihi yerine {len(active_days)} gün ders yerleşti.")
+        elif f_day == "floating_2_days" and len(active_days) > len(days) - 2:
+            msgs.append(f"{t.name}: 2 gün kayan boş gün tercihi yerine {len(active_days)} gün ders yerleşti.")
     return msgs, gap_report, total_gaps
 
 
@@ -712,23 +790,47 @@ def solve(request: SolveRequest):
 
         # ---- Aşama 0: geçerli çözüm (idareciler dahil tek birleşik model)
         use_consec = o["enforce_consecutive"]
+        allow_soft_float = False
+        lunch_after = getattr(request.settings, "lunchBreakAfter", None)
         model, x, terms, build_warn = build_model(use_consec, activities, classrooms, teachers,
-                                                  days, P, profiles, o, pinned_slots)
+                                                  days, P, profiles, o, pinned_slots,
+                                                  allow_soft_floating=allow_soft_float,
+                                                  lunch_after=lunch_after)
         print(f"[solver] model kuruldu {time.time() - start:.1f}s, işçi={workers}, "
               f"değişken={len(model.Proto().variables)}", flush=True)
         phase0_time = remaining() if o["stop_at_first"] else min(12.0, max(3.0, remaining() * 0.15))
         solver, st, _ = run_solver(model, phase0_time, workers)
-        print(f"[solver] temel (bitişiklik={'açık' if use_consec else 'kapalı'}): "
+        print(f"[solver] temel (bitişiklik={'açık' if use_consec else 'kapalı'}, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}): "
               f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
 
-        if not ok(st) and use_consec and st in (cp_model.INFEASIBLE, cp_model.UNKNOWN):
-            use_consec = False
-            warnings_extra.append("Ders-sınıf bitişiklik kuralıyla çözüm bulunamadı; kural kapatılarak çözüldü.")
-            model, x, terms, build_warn = build_model(False, activities, classrooms, teachers,
-                                                      days, P, profiles, o, pinned_slots)
+        if not ok(st) and (use_consec or not allow_soft_float) and st in (cp_model.INFEASIBLE, cp_model.UNKNOWN):
+            if use_consec:
+                use_consec = False
+                warnings_extra.append("Ders-sınıf bitişiklik kuralıyla çözüm bulunamadı; kural kapatılarak çözüldü.")
+            else:
+                allow_soft_float = True
+                warnings_extra.append("Sert kayan boş gün kısıtlarıyla çözüm bulunamadı; kısıtlar yumuşatılarak çözüldü.")
+
+            model, x, terms, build_warn = build_model(use_consec, activities, classrooms, teachers,
+                                                      days, P, profiles, o, pinned_slots,
+                                                      allow_soft_floating=allow_soft_float,
+                                                      lunch_after=lunch_after)
             phase0_retry = remaining() if o["stop_at_first"] else min(15.0, max(4.0, remaining() * 0.25))
             solver, st, _ = run_solver(model, phase0_retry, workers)
-            print(f"[solver] temel (bitişiklik=kapalı): {solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
+            print(f"[solver] temel deneme 1 (bitişiklik={'açık' if use_consec else 'kapalı'}, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}): "
+                  f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
+
+        if not ok(st) and not allow_soft_float and st in (cp_model.INFEASIBLE, cp_model.UNKNOWN):
+            allow_soft_float = True
+            warnings_extra.append("Sert kayan boş gün kısıtlarıyla çözüm bulunamadı; kısıtlar yumuşatılarak çözüldü.")
+            model, x, terms, build_warn = build_model(False, activities, classrooms, teachers,
+                                                      days, P, profiles, o, pinned_slots,
+                                                      allow_soft_floating=True,
+                                                      lunch_after=lunch_after)
+            phase0_retry2 = remaining() if o["stop_at_first"] else min(15.0, max(4.0, remaining() * 0.25))
+            solver, st, _ = run_solver(model, phase0_retry2, workers)
+            print(f"[solver] temel deneme 2 (bitişiklik=kapalı, sert_kayan=kapalı): "
+                  f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
 
         if not ok(st):
             last_status = solver.StatusName(st)

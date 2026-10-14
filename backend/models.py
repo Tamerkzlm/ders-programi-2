@@ -53,6 +53,9 @@ class Teacher(BaseModel):
     # 🏛️ İDARECİ (OKUL YÖNETİCİSİ) ETİKETİ - Dersleri en son boş kalan yerlere dağıtılır
     isAdministrator: Optional[bool] = False
 
+    # 🌊 ESNEK / KAYAN TERCİHLER ("Boş günüm ya da saatim fark etmez" diyen öğretmenler)
+    floatingConstraints: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
     class Config:
         extra = "allow"
 
