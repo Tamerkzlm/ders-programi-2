@@ -172,7 +172,7 @@ export default function ExamPlanner() {
 
   // Kullanıcının interaktif olarak seçtiği günler
   const selectedDatesList = useMemo(() => {
-    if (examSettings?.selectedDates && Array.isArray(examSettings.selectedDates) && examSettings.selectedDates.length > 0) {
+    if (examSettings?.selectedDates && Array.isArray(examSettings.selectedDates)) {
       return examSettings.selectedDates;
     }
     return allRangeDays.map(d => d.date);
@@ -272,6 +272,12 @@ export default function ExamPlanner() {
     const dates = allRangeDays.map(d => d.date);
     updateExamSettings({ selectedDates: dates });
     showToast('Tarih aralığındaki tüm hafta içi günler seçildi.');
+  };
+
+  // 1. Menü: Seçili Günleri Temizle
+  const handleClearAllDays = () => {
+    updateExamSettings({ selectedDates: [] });
+    showToast('Sınav günleri seçimi temizlendi. Takvimden istediğiniz günlere tıklayarak belirleyebilirsiniz.');
   };
 
   // 1. Menü: Ekstra / Özel Sınav Günü Ekle
