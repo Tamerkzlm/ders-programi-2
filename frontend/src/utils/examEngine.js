@@ -39,21 +39,52 @@ export const getWorkingDaysBetween = (startDateStr, endDateStr) => {
 };
 
 /**
+ * Tek bir tarih dizesini (YYYY-MM-DD) takvim gün objesine dönüştürür
+ */
+export const formatExamDay = (dateStr) => {
+  if (!dateStr) return null;
+  if (typeof dateStr === 'object' && dateStr.date) return dateStr;
+  
+  const parts = String(dateStr).split('-');
+  if (parts.length < 3) return null;
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  const dayNames = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
+  const dayOfWeek = d.getDay();
+  const year = parts[0];
+  const month = parts[1];
+  const day = parts[2];
+  return {
+    date: dateStr,
+    dayName: dayNames[dayOfWeek],
+    formatted: `${day}.${month}.${year} ${dayNames[dayOfWeek]}`
+  };
+};
+
+/**
  * Otomatik Ortak Sınav Dağıtım Fonksiyonu
  */
 export const solveExamSchedule = ({
   startDate,
   endDate,
+  selectedDates = null, // Kullanıcının takvimden bizzat seçtiği günler
   examSlots = [3, 5], // Sınavın yapılacağı ders saatleri (örn: 3. ve 5. ders)
   grades = ["9", "10", "11", "12"],
   subjectsByGrade = {}, // { "9": [ { id, name, isMajor }, ... ] }
 }) => {
-  const workingDays = getWorkingDaysBetween(startDate, endDate);
+  let workingDays = [];
+  if (selectedDates && Array.isArray(selectedDates) && selectedDates.length > 0) {
+    workingDays = selectedDates
+      .map(d => (typeof d === 'string' ? formatExamDay(d) : d))
+      .filter(Boolean)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } else {
+    workingDays = getWorkingDaysBetween(startDate, endDate);
+  }
   
   if (workingDays.length === 0) {
     return {
       success: false,
-      message: "Seçilen tarih aralığında hafta içi iş günü bulunamadı!",
+      message: "Seçilen sınav günleri listesi boş veya geçerli bir iş günü bulunamadı!",
       schedule: {},
       unassigned: []
     };

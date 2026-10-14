@@ -783,6 +783,7 @@ export const useAppStore = create(
       examSettings: {
         startDate: "2025-11-03",
         endDate: "2025-11-14",
+        selectedDates: ["2025-11-03", "2025-11-04", "2025-11-05", "2025-11-06", "2025-11-07", "2025-11-10", "2025-11-11", "2025-11-12", "2025-11-13", "2025-11-14"],
         examSlots: [3, 5],
         grades: ["9", "10", "11-SAY", "11-EA", "12"]
       },
@@ -826,6 +827,7 @@ export const useAppStore = create(
         const res = solveExamSchedule({
           startDate: examSettings.startDate,
           endDate: examSettings.endDate,
+          selectedDates: examSettings.selectedDates,
           examSlots: examSettings.examSlots,
           grades: examSettings.grades,
           subjectsByGrade: examSubjectsByGrade
