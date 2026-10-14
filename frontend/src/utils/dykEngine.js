@@ -142,8 +142,10 @@ export const solveDykSchedule = ({
   });
 
   // 3. Dağıtılacak blok aktiviteleri
+  const excludedTeacherIds = dykSettings?.excludedTeacherIds || [];
   const activities = [];
   dykAssignments.forEach(asg => {
+    if (excludedTeacherIds.includes(asg.teacherId)) return;
     const blocksCount = Number(asg.blocksPerWeek) || 1;
     for (let i = 0; i < blocksCount; i++) {
       activities.push({

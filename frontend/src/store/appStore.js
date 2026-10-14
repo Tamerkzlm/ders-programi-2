@@ -676,7 +676,8 @@ export const useAppStore = create(
         blocks: [
           { id: "b1", name: "1. Blok Kurs (15:50 - 17:00)", startTime: "15:50", endTime: "17:00" },
           { id: "b2", name: "2. Blok Kurs (18:00 - 19:10)", startTime: "18:00", endTime: "19:10" }
-        ]
+        ],
+        excludedTeacherIds: []
       },
       dykGroups: DEFAULT_DYK_GROUPS,
       dykAssignments: DEFAULT_DYK_ASSIGNMENTS,
@@ -685,6 +686,26 @@ export const useAppStore = create(
       dykResult: null,
 
       updateDykSettings: (newSettings) => set((state) => ({ dykSettings: { ...state.dykSettings, ...newSettings } })),
+      excludeTeacherFromDyk: (teacherId) => set((state) => {
+        const current = state.dykSettings?.excludedTeacherIds || [];
+        const nextExcluded = current.includes(teacherId) ? current : [...current, teacherId];
+        return {
+          dykSettings: {
+            ...state.dykSettings,
+            excludedTeacherIds: nextExcluded
+          },
+          dykAssignments: state.dykAssignments.filter(a => a.teacherId !== teacherId)
+        };
+      }),
+      includeTeacherInDyk: (teacherId) => set((state) => {
+        const current = state.dykSettings?.excludedTeacherIds || [];
+        return {
+          dykSettings: {
+            ...state.dykSettings,
+            excludedTeacherIds: current.filter(id => id !== teacherId)
+          }
+        };
+      }),
       addDykGroup: (group) => set((state) => ({ dykGroups: [...state.dykGroups, { ...group, id: newId('dg') }] })),
       updateDykGroup: (id, fields) => set((state) => ({ dykGroups: state.dykGroups.map(g => g.id === id ? { ...g, ...fields } : g) })),
       deleteDykGroup: (id) => set((state) => ({
