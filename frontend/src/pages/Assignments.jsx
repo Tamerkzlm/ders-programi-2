@@ -26,6 +26,7 @@ import {
 import { getCourseColorClass } from '../utils/courseColors';
 import DemoDataPromptModal from '../components/common/DemoDataPromptModal';
 import { generateCourseCode } from '../utils/courseCodeHelper';
+import AssignmentCardDesk from '../components/assignments/AssignmentCardDesk';
 
 // Sınıf adı ve ders adına göre tutarlı gradyan renkler
 const MODERN_GRADIENTS = [
@@ -49,8 +50,8 @@ const getSubjectStyle = (subjectName = '', className = '') => {
 export default function Assignments() {
   const { classrooms, teachers, updateClassroom, settings, timetable } = useAppStore();
   
-  // Ana Sekme: 'list' (Atama Listesi) veya 'schedule' (Haftalık İlişki Çizelgesi)
-  const [activeTab, setActiveTab] = useState('list');
+  // Ana Sekme: 'cards' (Akıllı Kart Masası), 'list' (Atama Listesi) veya 'schedule' (Haftalık İlişki Çizelgesi)
+  const [activeTab, setActiveTab] = useState('cards');
 
   // Filtreler (Atama Listesi İçin)
   const [searchTerm, setSearchTerm] = useState('');
@@ -315,6 +316,15 @@ export default function Assignments() {
           {/* SEKME DÜĞMELERİ */}
           <div className="flex bg-gray-100 p-1 rounded-xl shadow-inner">
             <button
+              onClick={() => setActiveTab('cards')}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all ${
+                activeTab === 'cards' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Sparkles size={14} className={activeTab === 'cards' ? 'text-amber-300' : 'text-indigo-600'} />
+              <span>🎴 Akıllı Kart Masası</span>
+            </button>
+            <button
               onClick={() => setActiveTab('list')}
               className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all ${
                 activeTab === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-800'
@@ -331,7 +341,7 @@ export default function Assignments() {
                 activeTab === 'schedule' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-800'
               }`}
             >
-              <CalendarDays size={14} /> 📅 Haftalık İlişki Çizelgesi
+              <CalendarDays size={14} /> 📅 Haftalık Çizelge
             </button>
           </div>
 
@@ -345,6 +355,13 @@ export default function Assignments() {
           )}
         </div>
       </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          SEKME 0: AKILLI KART EŞLEŞTİRME MASASI (3 KOLONLU MODERN DÜZEN)
+          ══════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'cards' && (
+        <AssignmentCardDesk />
+      )}
 
       {/* ══════════════════════════════════════════════════════════════════
           SEKME 1: ATAMA LİSTESİ (MATRİS BAĞLANTILARI)
