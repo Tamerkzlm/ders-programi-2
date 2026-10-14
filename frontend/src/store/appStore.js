@@ -31,8 +31,20 @@ export const calculateLiveMetrics = (timetable, teachers = [], classrooms = [], 
       unassigned: 0,
       totalSchoolGaps: 0,
       averageSchoolGaps: 0,
+      medianSchoolGaps: 0,
+      teachersAboveMedian: [],
       teachersAboveAverage: [],
       gapReport: {},
+      countWithoutFreeDay: 0,
+      teachersWithoutFreeDay: [],
+      countWithoutHalfDay: 0,
+      teachersWithoutHalfDay: [],
+      floatingDayRequested: 0,
+      floatingDayFailed: 0,
+      floatingDayFailedTeachers: [],
+      floatingHalfRequested: 0,
+      floatingHalfFailed: 0,
+      floatingHalfFailedTeachers: [],
       violations: []
     };
   }
@@ -103,6 +115,119 @@ export const calculateLiveMetrics = (timetable, teachers = [], classrooms = [], 
     });
     gapReport[t.name] = tGaps;
     totalSchoolGaps += tGaps;
+  });
+
+  // 3.1 Boş Gün ve Yarım Gün Boşluk Analizi
+  const numPeriods = Number(settings?.periodsPerDay) || 8;
+  const lunchAfter = Number(settings?.lunchAfter) || Math.ceil(numPeriods / 2);
+
+  const teachersWithoutFreeDay = [];
+  const teachersWithoutHalfDay = [];
+  const floatingDayFailedTeachers = [];
+  const floatingHalfFailedTeachers = [];
+  let floatingDayRequestedCount = 0;
+  let floatingHalfRequestedCount = 0;
+
+  (teachers || []).forEach(t => {
+    const load = teacherLoads[t.id] || 0;
+    if (load <= 0) return;
+
+    const tBusy = busy[t.id] || {};
+    const activeDays = days.filter(d => (tBusy[d] || []).length > 0);
+    const freeDays = days.filter(d => (tBusy[d] || []).length === 0);
+
+    // 1. Boş gün kontrolü (tüm günlerde dersi olanlar)
+    if (freeDays.length === 0) {
+      teachersWithoutFreeDay.push({
+        id: t.id,
+        name: t.name,
+        load,
+        activeDaysCount: activeDays.length
+      });
+    }
+
+    // Kayan boş gün tercihi kontrolü
+    const fDay = t.floatingConstraints?.freeDayPreference || 'none';
+    if (fDay === 'floating_1_day') {
+      floatingDayRequestedCount++;
+      if (freeDays.length < 1) {
+        floatingDayFailedTeachers.push({
+          id: t.id,
+          name: t.name,
+          load,
+          activeDaysCount: activeDays.length,
+          reason: `1 gün boş talep etti, ${activeDays.length} gün ders yerleşti`
+        });
+      }
+    } else if (fDay === 'floating_2_days') {
+      floatingDayRequestedCount++;
+      if (freeDays.length < 2) {
+        floatingDayFailedTeachers.push({
+          id: t.id,
+          name: t.name,
+          load,
+          activeDaysCount: activeDays.length,
+          reason: `2 gün boş talep etti, ${freeDays.length} gün boş kaldı`
+        });
+      }
+    }
+
+    // 2. Yarım gün boşluk kontrolü
+    let hasHalfDay = false;
+    let hasFreeAfternoon = false;
+    let hasFreeMorning = false;
+
+    if (freeDays.length > 0) {
+      hasHalfDay = true;
+      hasFreeAfternoon = true;
+      hasFreeMorning = true;
+    } else {
+      activeDays.forEach(d => {
+        const slots = tBusy[d] || [];
+        const hasMorn = slots.some(p => p <= lunchAfter);
+        const hasAft = slots.some(p => p > lunchAfter);
+        if (!hasAft && hasMorn) {
+          hasHalfDay = true;
+          hasFreeAfternoon = true;
+        }
+        if (!hasMorn && hasAft) {
+          hasHalfDay = true;
+          hasFreeMorning = true;
+        }
+      });
+    }
+
+    if (!hasHalfDay) {
+      teachersWithoutHalfDay.push({
+        id: t.id,
+        name: t.name,
+        load
+      });
+    }
+
+    // Kayan yarım gün tercihi kontrolü
+    const fHalf = t.floatingConstraints?.freeHalfDayPreference || 'none';
+    if (fHalf === 'any_afternoon') {
+      floatingHalfRequestedCount++;
+      if (!hasFreeAfternoon) {
+        floatingHalfFailedTeachers.push({
+          id: t.id,
+          name: t.name,
+          load,
+          reason: 'Öğleden sonra boşluk talep etti, her gün öğleden sonra dersi var'
+        });
+      }
+    } else if (fHalf === 'any_morning') {
+      floatingHalfRequestedCount++;
+      if (!hasFreeMorning) {
+        floatingHalfFailedTeachers.push({
+          id: t.id,
+          name: t.name,
+          load,
+          reason: 'Sabah boşluk talep etti, her gün sabah dersi var'
+        });
+      }
+    }
   });
 
   // 4. Adalet Skalası: İdareciler, muaf/istisna olanlar ve ders yükü olmayanlar hariç tutulur
@@ -202,7 +327,17 @@ export const calculateLiveMetrics = (timetable, teachers = [], classrooms = [], 
     gapReport,
     fairnessScore,
     fairnessLabel,
-    fairnessColor
+    fairnessColor,
+    countWithoutFreeDay: teachersWithoutFreeDay.length,
+    teachersWithoutFreeDay,
+    countWithoutHalfDay: teachersWithoutHalfDay.length,
+    teachersWithoutHalfDay,
+    floatingDayRequested: floatingDayRequestedCount,
+    floatingDayFailed: floatingDayFailedTeachers.length,
+    floatingDayFailedTeachers,
+    floatingHalfRequested: floatingHalfRequestedCount,
+    floatingHalfFailed: floatingHalfFailedTeachers.length,
+    floatingHalfFailedTeachers
   };
 };
 

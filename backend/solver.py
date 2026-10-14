@@ -996,6 +996,108 @@ def solve(request: SolveRequest):
             violations.append(f"Kural ihlali kalan {len(rule_msgs)} durum (süre/sıkışıklık nedeniyle gevşetildi):")
             violations.extend(rule_msgs[:30])
 
+        # 📊 BOŞ GÜN & YARIM GÜN BOŞLUK ANALİZİ (Nihai Rapor İstatistiği)
+        lunch_break = getattr(request.settings, "lunchBreakAfter", None)
+        cutoff = lunch_break if (lunch_break and 1 <= lunch_break < P) else math.ceil(P / 2)
+
+        teachers_without_free_day = []
+        teachers_without_half_day = []
+        floating_day_failed = []
+        floating_half_failed = []
+        floating_day_req_count = 0
+        floating_half_req_count = 0
+
+        for t in teachers:
+            prof = profiles.get(t.id, {})
+            load = prof.get("weekly", 0)
+            if load <= 0:
+                continue
+
+            t_busy = busy.get(t.id, {})
+            active_days = [d for d in days if len(t_busy.get(d, set())) > 0]
+            free_days = [d for d in days if len(t_busy.get(d, set())) == 0]
+
+            # 1. Boş Gün Durumu (Haftanın tüm günlerinde dersi olanlar)
+            if len(free_days) == 0:
+                teachers_without_free_day.append({
+                    "id": t.id,
+                    "name": t.name,
+                    "load": load,
+                    "activeDays": len(active_days)
+                })
+
+            # Kayan boş gün tercihi kontrolü
+            f_day = prof.get("free_day_pref", "none")
+            if f_day == "floating_1_day":
+                floating_day_req_count += 1
+                if len(free_days) < 1:
+                    floating_day_failed.append({
+                        "id": t.id,
+                        "name": t.name,
+                        "load": load,
+                        "activeDays": len(active_days),
+                        "reason": f"1 gün boş talep etti, {len(active_days)} gün ders yerleşti"
+                    })
+            elif f_day == "floating_2_days":
+                floating_day_req_count += 1
+                if len(free_days) < 2:
+                    floating_day_failed.append({
+                        "id": t.id,
+                        "name": t.name,
+                        "load": load,
+                        "activeDays": len(active_days),
+                        "reason": f"2 gün boş talep etti, {len(free_days)} gün boş kaldı"
+                    })
+
+            # 2. Yarım Gün Boşluk Durumu
+            has_half_day = False
+            has_free_afternoon = False
+            has_free_morning = False
+
+            if len(free_days) > 0:
+                has_half_day = True
+                has_free_afternoon = True
+                has_free_morning = True
+            else:
+                for d in active_days:
+                    slots = t_busy.get(d, set())
+                    morn = any(p <= cutoff for p in slots)
+                    aft = any(p > cutoff for p in slots)
+                    if not aft and morn:
+                        has_half_day = True
+                        has_free_afternoon = True
+                    if not morn and aft:
+                        has_half_day = True
+                        has_free_morning = True
+
+            if not has_half_day:
+                teachers_without_half_day.append({
+                    "id": t.id,
+                    "name": t.name,
+                    "load": load
+                })
+
+            # Kayan yarım gün tercihi kontrolü
+            f_half = prof.get("free_half_pref", "none")
+            if f_half == "any_afternoon":
+                floating_half_req_count += 1
+                if not has_free_afternoon:
+                    floating_half_failed.append({
+                        "id": t.id,
+                        "name": t.name,
+                        "load": load,
+                        "reason": "Öğleden sonra boşluk talep etti, her gün öğleden sonra dersi var"
+                    })
+            elif f_half == "any_morning":
+                floating_half_req_count += 1
+                if not has_free_morning:
+                    floating_half_failed.append({
+                        "id": t.id,
+                        "name": t.name,
+                        "load": load,
+                        "reason": "Sabah boşluk talep etti, her gün ilk saatlerde dersi var"
+                    })
+
         total_required = sum(c.hoursPerWeek for cl in classrooms for c in cl.courses)
         return {
             "status": "ok",
@@ -1013,6 +1115,16 @@ def solve(request: SolveRequest):
                 "fairnessScore": fairness_score,
                 "fairnessLabel": fairness_label,
                 "fairnessColor": fairness_color,
+                "countWithoutFreeDay": len(teachers_without_free_day),
+                "teachersWithoutFreeDay": teachers_without_free_day,
+                "countWithoutHalfDay": len(teachers_without_half_day),
+                "teachersWithoutHalfDay": teachers_without_half_day,
+                "floatingDayRequested": floating_day_req_count,
+                "floatingDayFailed": len(floating_day_failed),
+                "floatingDayFailedTeachers": floating_day_failed,
+                "floatingHalfRequested": floating_half_req_count,
+                "floatingHalfFailed": len(floating_half_failed),
+                "floatingHalfFailedTeachers": floating_half_failed,
                 "violations": violations,
                 "ruleViolations": len(rule_msgs),
                 "stage": stage,

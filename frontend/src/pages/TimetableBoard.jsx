@@ -616,6 +616,20 @@ export default function TimetableBoard() {
                 <span className="text-[11px] text-gray-500">Ort:</span>
                 <span className="text-purple-600 font-black">{generateResult.metrics.averageSchoolGaps ?? 0} Sa</span>
               </div>
+              <div className="w-[1px] h-3.5 bg-gray-200"></div>
+              <div className="flex items-center gap-1 text-gray-700" title="Haftanın tüm günlerinde dersi olan (hiç tam boş günü olmayan) öğretmen sayısı">
+                <span className="text-[11px] text-gray-500">Boş Günü Olmayan:</span>
+                <span className={`font-black ${(generateResult.metrics.countWithoutFreeDay || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {generateResult.metrics.countWithoutFreeDay ?? 0}
+                </span>
+              </div>
+              <div className="w-[1px] h-3.5 bg-gray-200"></div>
+              <div className="flex items-center gap-1 text-gray-700" title="Hiçbir gün sabahı veya öğleden sonrası serbest olmayan öğretmen sayısı">
+                <span className="text-[11px] text-gray-500">Yarım Gün Olmayan:</span>
+                <span className={`font-black ${(generateResult.metrics.countWithoutHalfDay || 0) > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                  {generateResult.metrics.countWithoutHalfDay ?? 0}
+                </span>
+              </div>
 
               {generateResult.metrics.unassigned > 0 && (
                 <>
