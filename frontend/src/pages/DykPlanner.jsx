@@ -43,7 +43,9 @@ import {
   analyzeTeacherSchoolSchedule,
   executeDykSwap,
   placeUnassignedDykActivity,
-  isTeacherFreeInDyk
+  isTeacherFreeInDyk,
+  getDykBlockTimes,
+  formatDykScheduleHeaderTimes
 } from '../utils/dykEngine';
 import { getCourseColorClass } from '../utils/courseColors';
 
@@ -61,6 +63,8 @@ export default function DykPlanner() {
     dykResult,
     updateSettings,
     updateDykSettings,
+    setDykDayCustomTimes,
+    resetDykDayCustomTimes,
     addTeacher,
     excludeTeacherFromDyk,
     includeTeacherInDyk,
@@ -110,6 +114,78 @@ export default function DykPlanner() {
     { id: "b1", name: "1. Blok Kurs (15:50 - 17:00)", startTime: "15:50", endTime: "17:00" },
     { id: "b2", name: "2. Blok Kurs (18:00 - 19:10)", startTime: "18:00", endTime: "19:10" }
   ];
+  const dayCustomTimes = dykSettings?.dayCustomTimes || {};
+
+  // 🕒 GÜNE ÖZEL SAAT SEÇİCİ SEKMESİ (Menü 1)
+  const [selectedTimeDay, setSelectedTimeDay] = useState("Çarşamba");
+
+  const handleUpdateDayBlockTime = (day, blockId, field, value) => {
+    const currentDayTimes = dayCustomTimes[day] || {};
+    const defaultBlock = blocks.find(b => b.id === blockId) || {};
+    const existing = currentDayTimes[blockId] || {
+      startTime: defaultBlock.startTime || "15:50",
+      endTime: defaultBlock.endTime || "17:00"
+    };
+    
+    const updated = {
+      ...currentDayTimes,
+      [blockId]: {
+        ...existing,
+        [field]: value
+      }
+    };
+    setDykDayCustomTimes(day, updated);
+  };
+
+  const handleEnableCustomDayTimes = (day) => {
+    const initialMap = {};
+    blocks.forEach(b => {
+      // Çarşamba için örnek olarak 18:00 başlat, diğerleri için mevcut saati baz al
+      if (day === "Çarşamba") {
+        if (b.id === "b1") initialMap[b.id] = { startTime: "18:00", endTime: "19:10" };
+        else if (b.id === "b2") initialMap[b.id] = { startTime: "19:20", endTime: "20:30" };
+        else initialMap[b.id] = { startTime: b.startTime, endTime: b.endTime };
+      } else {
+        initialMap[b.id] = { startTime: b.startTime, endTime: b.endTime };
+      }
+    });
+    setDykDayCustomTimes(day, initialMap);
+    showToast(`"${day}" günü için özel saatler aktif edildi. Aşağıdan saatleri düzenleyebilirsiniz.`);
+  };
+
+  const handleResetCustomDayTimes = (day) => {
+    resetDykDayCustomTimes(day);
+    showToast(`"${day}" günü saatleri varsayılan çizelgeye sıfırlandı.`);
+  };
+
+  // 🛡️ MODERN ONAY MODALI (SİSTEM UYARISI YERİNE)
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    details: '',
+    confirmText: 'Evet, Sil',
+    cancelText: 'Vazgeç',
+    isDanger: true,
+    onConfirm: null
+  });
+
+  const openConfirmModal = ({ title, message, details, confirmText = 'Evet, Sil', cancelText = 'Vazgeç', isDanger = true, onConfirm }) => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      details,
+      confirmText,
+      cancelText,
+      isDanger,
+      onConfirm
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModal(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
 
   // 🏫 Okul Ders Programı Son Ders Analizi
   const teacherSchoolAnalysis = useMemo(() => {
@@ -267,10 +343,18 @@ export default function DykPlanner() {
 
   // 🗑️ Öğretmeni DYK Modülünden Çıkar / Katılmıyor Yap (Okul programı silinmez!)
   const handleExcludeTeacher = (teacherId, teacherName) => {
-    if (window.confirm(`"${teacherName}" isimli öğretmeni DYK modülünden çıkarmak istediğinize emin misiniz?\n\n(Bu işlem öğretmenin okul ders programındaki derslerini kesinlikle ETKİLEMEZ. Sadece DYK kurslarında ders verilmesini engeller.)`)) {
-      excludeTeacherFromDyk(teacherId);
-      showToast(`"${teacherName}" DYK kurs modülünden çıkarıldı.`);
-    }
+    openConfirmModal({
+      title: 'Öğretmeni DYK Kursundan Çıkar',
+      message: `"${teacherName}" isimli öğretmeni DYK modülünden çıkarmak istediğinize emin misiniz?`,
+      details: 'Bu işlem öğretmenin ana okul ders programındaki derslerini kesinlikle ETKİLEMEZ. Sadece DYK kurslarında ders verilmesini engeller.',
+      confirmText: 'DYK\'dan Çıkar',
+      cancelText: 'Vazgeç',
+      isDanger: true,
+      onConfirm: () => {
+        excludeTeacherFromDyk(teacherId);
+        showToast(`"${teacherName}" DYK kurs modülünden çıkarıldı.`);
+      }
+    });
   };
 
   // ✅ Öğretmeni DYK Modülüne Geri Ekle / Dahil Et
@@ -817,6 +901,158 @@ export default function DykPlanner() {
               </div>
             </div>
 
+            {/* 🕒 GÜNE ÖZEL KURS SAATLERİ (ÖRN: ÇARŞAMBA 18:00 BAŞLANGICI) */}
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                    <Sliders size={16} className="text-emerald-600" />
+                    <span>Güne Özel Kurs Saatleri Ayarlama</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Örneğin <strong>Çarşamba günü kurs 18:00'da başlarken</strong>, diğer günler 15:50'de başlayacak şekilde her güne özel başlangıç ve bitiş saatleri tanımlayabilirsiniz.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>Esnek Günlük Çizelge</span>
+                </div>
+              </div>
+
+              {/* Gün Seçici Sekmeler */}
+              <div className="flex flex-wrap items-center gap-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
+                {activeDays.map(day => {
+                  const hasCustom = Boolean(dayCustomTimes[day] && Object.keys(dayCustomTimes[day]).length > 0);
+                  const isSelected = selectedTimeDay === day;
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => setSelectedTimeDay(day)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : hasCustom
+                          ? 'bg-amber-100/80 text-amber-900 border border-amber-300 hover:bg-amber-100'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                      }`}
+                    >
+                      <span>{day}</span>
+                      {hasCustom && (
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-extrabold uppercase ${
+                          isSelected ? 'bg-white text-emerald-800' : 'bg-amber-200 text-amber-950'
+                        }`}>
+                          Özel Saat
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Seçilen Günün Saat Ayarları Paneli */}
+              {(() => {
+                const day = selectedTimeDay;
+                const hasCustom = Boolean(dayCustomTimes[day] && Object.keys(dayCustomTimes[day]).length > 0);
+                const dayTimes = dayCustomTimes[day] || {};
+
+                return (
+                  <div className="space-y-4 pt-1">
+                    {hasCustom ? (
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2 p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200">
+                          <div className="flex items-center gap-2.5">
+                            <span className="w-7 h-7 rounded-xl bg-amber-500 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                              ⚡
+                            </span>
+                            <div>
+                              <div className="text-xs font-extrabold text-amber-950">
+                                {day} Günü İçin Özel Saatler Aktif
+                              </div>
+                              <div className="text-[11px] text-amber-800">
+                                Bu gün için ayarladığınız saatler yalnızca {day} günkü çizelgeye yansır.
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleResetCustomDayTimes(day)}
+                            className="px-3 py-1 rounded-xl bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold transition-colors cursor-pointer"
+                          >
+                            Varsayılan Saatlere Sıfırla (15:50)
+                          </button>
+                        </div>
+
+                        {/* Blok Bazında Saat Düzenleme */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {blocks.map((block, idx) => {
+                            const bTime = dayTimes[block.id] || { startTime: block.startTime, endTime: block.endTime };
+                            return (
+                              <div
+                                key={block.id}
+                                className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="font-extrabold text-xs text-slate-900">
+                                    {idx + 1}. Blok ({block.name})
+                                  </span>
+                                  <span className="text-[10px] text-emerald-700 font-mono font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                    {bTime.startTime} - {bTime.endTime}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2.5">
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                                      Başlangıç Saati
+                                    </label>
+                                    <input
+                                      type="time"
+                                      value={bTime.startTime}
+                                      onChange={(e) => handleUpdateDayBlockTime(day, block.id, 'startTime', e.target.value)}
+                                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                                      Bitiş Saati
+                                    </label>
+                                    <input
+                                      type="time"
+                                      value={bTime.endTime}
+                                      onChange={(e) => handleUpdateDayBlockTime(day, block.id, 'endTime', e.target.value)}
+                                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-6 rounded-2xl bg-slate-50 border border-dashed border-slate-300 text-center space-y-3">
+                        <div className="text-xs text-slate-600 font-medium max-w-md mx-auto">
+                          <strong>{day}</strong> günü şu anda tüm okul için belirlenen varsayılan saatleri (
+                          {blocks.map((b, i) => `${i + 1}. Blok: ${b.startTime} - ${b.endTime}`).join(', ')}
+                          ) kullanıyor.
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleEnableCustomDayTimes(day)}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                        >
+                          <Plus size={14} />
+                          <span>{day} Gününe Özel Saat Belirle (Örn: 18:00 Başlangıç)</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
             {/* İleri Adım Butonu */}
             <div className="flex justify-between items-center pt-2">
               <span className="text-xs text-slate-500 font-medium">
@@ -971,10 +1207,18 @@ export default function DykPlanner() {
                           <button
                             type="button"
                             onClick={() => {
-                              if (window.confirm(`"${group.name}" sınıfını silmek istediğinize emin misiniz?`)) {
-                                deleteDykGroup(group.id);
-                                showToast(`"${group.name}" silindi.`);
-                              }
+                              openConfirmModal({
+                                title: 'Sınıfı Silmek İstiyor musunuz?',
+                                message: `"${group.name}" sınıfını DYK modülünden silmek üzeresiniz.`,
+                                details: 'Bu sınıfa ait tüm ders atamaları ve haftalık dağıtım programı da silinecektir.',
+                                confirmText: 'Sınıfı Sil',
+                                cancelText: 'Vazgeç',
+                                isDanger: true,
+                                onConfirm: () => {
+                                  deleteDykGroup(group.id);
+                                  showToast(`"${group.name}" başarıyla silindi.`);
+                                }
+                              });
                             }}
                             className="text-slate-300 hover:text-rose-600 transition-colors p-1 cursor-pointer"
                             title="Sınıfı Sil"
@@ -1701,7 +1945,20 @@ export default function DykPlanner() {
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={clearDykSchedule}
+                  onClick={() => {
+                    openConfirmModal({
+                      title: 'DYK Dağıtımını Temizle',
+                      message: 'Mevcut DYK haftalık ders dağıtım çizelgesini temizlemek istediğinize emin misiniz?',
+                      details: 'Oluşturulmuş olan ders saatleri sıfırlanacaktır. Tanımladığınız ders atamaları korunur.',
+                      confirmText: 'Dağıtımı Temizle',
+                      cancelText: 'Vazgeç',
+                      isDanger: true,
+                      onConfirm: () => {
+                        clearDykSchedule();
+                        showToast("DYK programı dağıtımı temizlendi.");
+                      }
+                    });
+                  }}
                   className="px-3.5 py-2 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-bold transition-colors cursor-pointer"
                 >
                   Dağıtımı Temizle
@@ -2013,7 +2270,7 @@ export default function DykPlanner() {
                     DESTEKLEME VE YETİŞTİRME KURSLARI (DYK) HAFTALIK DERS DAĞITIM ÇİZELGESİ
                   </div>
                   <p className="text-[11px] text-slate-500 print:text-gray-700">
-                    {academicYear || '2024 - 2025'} Eğitim ve Öğretim Yılı &nbsp;|&nbsp; Kurs Saatleri: 1. Blok (15:50 - 17:00), 2. Blok (18:00 - 19:10)
+                    {academicYear || '2024 - 2025'} Eğitim ve Öğretim Yılı &nbsp;|&nbsp; Kurs Saatleri: {formatDykScheduleHeaderTimes(dykSettings)}
                   </p>
                 </div>
 
@@ -2034,11 +2291,19 @@ export default function DykPlanner() {
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold print:bg-white print:border-black">
                             <th className="p-3 border-r border-slate-200 text-left font-black print:border-black">Kurs Blokları</th>
-                            {activeDays.map(day => (
-                              <th key={day} className="p-3 border-r border-slate-200 last:border-r-0 font-extrabold print:border-black">
-                                {day}
-                              </th>
-                            ))}
+                            {activeDays.map(day => {
+                              const hasCustom = Boolean(dayCustomTimes[day] && Object.keys(dayCustomTimes[day]).length > 0);
+                              return (
+                                <th key={day} className="p-3 border-r border-slate-200 last:border-r-0 font-extrabold print:border-black">
+                                  <div>{day}</div>
+                                  {hasCustom && (
+                                    <span className="text-[9px] text-amber-700 font-normal font-mono block print:text-black">
+                                      (Özel Saat)
+                                    </span>
+                                  )}
+                                </th>
+                              );
+                            })}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 print:divide-black">
@@ -2047,12 +2312,13 @@ export default function DykPlanner() {
                               <td className="p-3 text-left border-r border-slate-200 bg-slate-50/80 font-bold text-slate-800 print:bg-white print:border-black">
                                 <div>{block.name}</div>
                                 <div className="text-[10px] text-slate-400 font-mono print:text-gray-600">
-                                  {block.startTime} - {block.endTime}
+                                  Varsayılan: {block.startTime} - {block.endTime}
                                 </div>
                               </td>
                               {activeDays.map(day => {
                                 const currentGroupId = selectedGroupId || dykGroups?.[0]?.id;
                                 const item = dykSchedule?.[currentGroupId]?.[day]?.[block.id];
+                                const times = getDykBlockTimes(dykSettings, day, block.id);
                                 const isSelected = selectedSwapSlot && 
                                   selectedSwapSlot.groupId === currentGroupId && 
                                   selectedSwapSlot.day === day && 
@@ -2083,7 +2349,7 @@ export default function DykPlanner() {
                                         ? (item ? "Bu ders ile TAKAS ET" : "Bu boş saate TAŞI")
                                         : isPoolActive
                                         ? (item ? "Dolu saat (Seçilemez)" : "Havuzdaki dersi BURAYA YERLEŞTİR")
-                                        : item ? "Akıllı Takas / Taşıma için Tıklayın" : "Boş saat"
+                                        : item ? `Akıllı Takas / Taşıma için Tıklayın (${times.startTime} - ${times.endTime})` : `Boş saat (${times.startTime} - ${times.endTime})`
                                     }
                                   >
                                     {item ? (
@@ -2097,6 +2363,16 @@ export default function DykPlanner() {
                                         </div>
                                         <div className={`text-[11px] font-semibold mt-0.5 ${isSelected ? 'text-emerald-100' : 'text-slate-600 print:text-black'}`}>
                                           {getTeacherName(item.teacherId)}
+                                        </div>
+                                        <div className={`text-[10px] font-mono mt-1 flex items-center justify-between ${
+                                          isSelected ? 'text-emerald-200' : 'text-emerald-800 print:text-gray-600'
+                                        }`}>
+                                          <span>{times.startTime} - {times.endTime}</span>
+                                          {times.isCustom && (
+                                            <span className="text-[8px] px-1 rounded bg-amber-200 text-amber-900 font-bold print:hidden">
+                                              Özel
+                                            </span>
+                                          )}
                                         </div>
                                         {isSwapActive && !isSelected && (
                                           <div className="text-[10px] font-bold text-blue-700 mt-1 flex items-center justify-center gap-1 print:hidden">
@@ -2116,7 +2392,12 @@ export default function DykPlanner() {
                                             + Buraya Yerleştir
                                           </span>
                                         ) : (
-                                          <span className="text-slate-300 font-bold print:text-gray-400">—</span>
+                                          <div>
+                                            <span className="text-slate-300 font-bold print:text-gray-400">—</span>
+                                            <span className="text-[10px] text-slate-400 font-mono block print:hidden mt-0.5">
+                                              {times.startTime}
+                                            </span>
+                                          </div>
                                         )}
                                       </div>
                                     )}
@@ -2217,21 +2498,33 @@ export default function DykPlanner() {
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold print:bg-white print:border-black">
                             <th className="p-2 border-r border-slate-200 text-left font-black print:border-black">DYK Sınıfı</th>
-                            {activeDays.map(day => (
-                              <th key={day} colSpan={blocks.length} className="p-2 border-r border-slate-200 last:border-r-0 font-extrabold print:border-black">
-                                {day}
-                              </th>
-                            ))}
+                            {activeDays.map(day => {
+                              const hasCustom = Boolean(dayCustomTimes[day] && Object.keys(dayCustomTimes[day]).length > 0);
+                              return (
+                                <th key={day} colSpan={blocks.length} className="p-2 border-r border-slate-200 last:border-r-0 font-extrabold print:border-black">
+                                  <div>{day}</div>
+                                  {hasCustom && (
+                                    <div className="text-[9px] text-amber-700 font-mono font-normal print:text-black">
+                                      (Özel Saat)
+                                    </div>
+                                  )}
+                                </th>
+                              );
+                            })}
                           </tr>
                           <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-500 text-[10px] font-bold print:bg-white print:border-black">
                             <th className="p-1 border-r border-slate-200 print:border-black"></th>
                             {activeDays.map(day => (
                               <React.Fragment key={day}>
-                                {blocks.map((b, idx) => (
-                                  <th key={b.id} className="p-1 border-r border-slate-200 last:border-r-0 font-mono print:border-black">
-                                    {idx + 1}. Blok
-                                  </th>
-                                ))}
+                                {blocks.map((b, idx) => {
+                                  const times = getDykBlockTimes(dykSettings, day, b.id);
+                                  return (
+                                    <th key={b.id} className="p-1 border-r border-slate-200 last:border-r-0 font-mono print:border-black">
+                                      <div>{idx + 1}. Blok</div>
+                                      <div className="text-[9px] font-normal opacity-75">{times.startTime}</div>
+                                    </th>
+                                  );
+                                })}
                               </React.Fragment>
                             ))}
                           </tr>
@@ -2246,6 +2539,7 @@ export default function DykPlanner() {
                                 <React.Fragment key={day}>
                                   {blocks.map(b => {
                                     const cell = dykSchedule?.[group.id]?.[day]?.[b.id];
+                                    const times = getDykBlockTimes(dykSettings, day, b.id);
                                     const isSelected = selectedSwapSlot &&
                                       selectedSwapSlot.groupId === group.id &&
                                       selectedSwapSlot.day === day &&
@@ -2275,7 +2569,7 @@ export default function DykPlanner() {
                                             ? (cell ? "Takas Et" : "Buraya Taşı")
                                             : isPoolActive && selectedPoolActivity.groupId === group.id
                                             ? (cell ? "Dolu" : "Buraya Yerleştir")
-                                            : cell ? "Seçmek için tıklayın" : "Boş"
+                                            : cell ? `Seçmek için tıklayın (${times.startTime} - ${times.endTime})` : `Boş (${times.startTime} - ${times.endTime})`
                                         }
                                       >
                                         {cell ? (
@@ -2289,6 +2583,9 @@ export default function DykPlanner() {
                                             </div>
                                             <div className={`text-[9px] truncate ${isSelected ? 'text-emerald-100' : 'text-slate-500 print:text-black'}`}>
                                               {getTeacherName(cell.teacherId)}
+                                            </div>
+                                            <div className={`text-[8px] font-mono mt-0.5 ${isSelected ? 'text-emerald-200' : 'text-slate-400 print:text-black'}`}>
+                                              {times.startTime}
                                             </div>
                                           </div>
                                         ) : (
@@ -2491,6 +2788,69 @@ export default function DykPlanner() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ========================================================= */}
+      {/* 🛡️ MODERN ONAY MODALI (SİSTEM UYARISI YERİNE) */}
+      {/* ========================================================= */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3.5">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 text-xl border ${
+                confirmModal.isDanger
+                  ? 'bg-rose-50 text-rose-600 border-rose-100'
+                  : 'bg-amber-50 text-amber-600 border-amber-100'
+              }`}>
+                {confirmModal.isDanger ? '🗑️' : '⚠️'}
+              </div>
+              <div>
+                <h3 className="text-sm sm:text-base font-extrabold text-slate-900">
+                  {confirmModal.title}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Lütfen işleminizi onaylayın.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-1.5">
+              <p className="text-xs font-bold text-slate-800 leading-snug">
+                {confirmModal.message}
+              </p>
+              {confirmModal.details && (
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  {confirmModal.details}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={closeConfirmModal}
+                className="px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 text-xs font-bold transition-all cursor-pointer"
+              >
+                {confirmModal.cancelText || 'Vazgeç'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirmModal.onConfirm) {
+                    confirmModal.onConfirm();
+                  }
+                  closeConfirmModal();
+                }}
+                className={`px-5 py-2.5 rounded-xl text-white text-xs font-bold shadow-xs transition-all cursor-pointer ${
+                  confirmModal.isDanger
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+              >
+                {confirmModal.confirmText || 'Evet, Onayla'}
+              </button>
+            </div>
           </div>
         </div>
       )}

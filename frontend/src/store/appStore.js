@@ -677,6 +677,7 @@ export const useAppStore = create(
           { id: "b1", name: "1. Blok Kurs (15:50 - 17:00)", startTime: "15:50", endTime: "17:00" },
           { id: "b2", name: "2. Blok Kurs (18:00 - 19:10)", startTime: "18:00", endTime: "19:10" }
         ],
+        dayCustomTimes: {}, // { [day]: { [blockId]: { startTime, endTime } } }
         excludedTeacherIds: []
       },
       dykGroups: DEFAULT_DYK_GROUPS,
@@ -686,6 +687,28 @@ export const useAppStore = create(
       dykResult: null,
 
       updateDykSettings: (newSettings) => set((state) => ({ dykSettings: { ...state.dykSettings, ...newSettings } })),
+      setDykDayCustomTimes: (day, timesMap) => set((state) => {
+        const prev = state.dykSettings?.dayCustomTimes || {};
+        return {
+          dykSettings: {
+            ...state.dykSettings,
+            dayCustomTimes: {
+              ...prev,
+              [day]: timesMap
+            }
+          }
+        };
+      }),
+      resetDykDayCustomTimes: (day) => set((state) => {
+        const prev = { ...(state.dykSettings?.dayCustomTimes || {}) };
+        delete prev[day];
+        return {
+          dykSettings: {
+            ...state.dykSettings,
+            dayCustomTimes: prev
+          }
+        };
+      }),
       excludeTeacherFromDyk: (teacherId) => set((state) => {
         const current = state.dykSettings?.excludedTeacherIds || [];
         const nextExcluded = current.includes(teacherId) ? current : [...current, teacherId];

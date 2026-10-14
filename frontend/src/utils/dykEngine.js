@@ -415,3 +415,55 @@ export const placeUnassignedDykActivity = ({
   return { success: true, newSchedule };
 };
 
+/**
+ * 🕒 GÜNE ÖZEL VEYA VARSAYILAN BLOK SAATLERİNİ DÖNER
+ * Örneğin Çarşamba günü 18:00 başlangıcı, diğer günler 15:50 başlangıcı
+ */
+export const getDykBlockTimes = (dykSettings, day, blockId) => {
+  const custom = dykSettings?.dayCustomTimes?.[day]?.[blockId];
+  if (custom && custom.startTime && custom.endTime) {
+    return {
+      startTime: custom.startTime,
+      endTime: custom.endTime,
+      isCustom: true
+    };
+  }
+  const defaultBlock = (dykSettings?.blocks || []).find(b => b.id === blockId);
+  return {
+    startTime: defaultBlock?.startTime || "15:50",
+    endTime: defaultBlock?.endTime || "17:00",
+    isCustom: false
+  };
+};
+
+/**
+ * 🖨️ RESMİ ÇIKTI VE BAŞLIK İÇİN ZAMAN ÇİZELGESİ ÖZETİ ÜRETİR
+ */
+export const formatDykScheduleHeaderTimes = (dykSettings) => {
+  const blocks = dykSettings?.blocks || [];
+  const activeDays = dykSettings?.activeDays || [];
+  const dayCustomTimes = dykSettings?.dayCustomTimes || {};
+
+  // Varsayılan saat metni
+  const defaultSummary = blocks
+    .map((b, i) => `${i + 1}. Blok (${b.startTime} - ${b.endTime})`)
+    .join(', ');
+
+  // Güne özel saatler var mı kontrol et
+  const customParts = [];
+  activeDays.forEach(day => {
+    if (dayCustomTimes[day] && Object.keys(dayCustomTimes[day]).length > 0) {
+      const timesStr = blocks.map((b, i) => {
+        const t = dayCustomTimes[day][b.id] || { startTime: b.startTime, endTime: b.endTime };
+        return `${i + 1}. Blok (${t.startTime} - ${t.endTime})`;
+      }).join(', ');
+      customParts.push(`${day}: ${timesStr}`);
+    }
+  });
+
+  if (customParts.length > 0) {
+    return `Genel: ${defaultSummary}  |  Özel Saatler: ${customParts.join('  ·  ')}`;
+  }
+  return defaultSummary;
+};
+
