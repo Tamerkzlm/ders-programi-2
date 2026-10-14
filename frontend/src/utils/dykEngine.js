@@ -261,3 +261,157 @@ export const solveDykSchedule = ({
     teacherSchoolAnalysis
   };
 };
+
+/**
+ * ⚡ SMART SWAP (AKILLI TAKAS) DYK KONTROLÜ
+ * Bir öğretmenin belirli bir gün ve blokta müsait olup olmadığını denetler.
+ */
+export const isTeacherFreeInDyk = ({
+  dykSchedule = {},
+  teacherId,
+  day,
+  blockId,
+  ignoreGroupId = null,
+  dykTeacherAvailabilities = {},
+  activeDays = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"]
+}) => {
+  if (!teacherId || !day || !blockId) return false;
+
+  // 1. Gün uygunluğu
+  const allowed = dykTeacherAvailabilities[teacherId];
+  if (allowed && allowed.length > 0 && !allowed.includes(day)) {
+    return { free: false, reason: "Öğretmenin bu gün için DYK onayı bulunmuyor." };
+  }
+
+  // 2. Başka bir grupta o saatte dersi var mı?
+  for (const gId of Object.keys(dykSchedule)) {
+    if (ignoreGroupId && gId === ignoreGroupId) continue;
+    const cell = dykSchedule[gId]?.[day]?.[blockId];
+    if (cell && cell.teacherId === teacherId) {
+      return { free: false, reason: `Öğretmen bu saatte başka bir grupta (${gId}) derste.` };
+    }
+  }
+
+  return { free: true };
+};
+
+/**
+ * ⚡ İKİ DYK DERSİNİ GÜVENLİ TAKAS ET VEYA BOŞ YERE TAŞI
+ */
+export const executeDykSwap = ({
+  dykSchedule = {},
+  groupId,
+  sourceDay,
+  sourceBlockId,
+  targetDay,
+  targetBlockId,
+  dykTeacherAvailabilities = {},
+  activeDays = []
+}) => {
+  if (!dykSchedule[groupId]) {
+    return { success: false, reason: "Grup bulunamadı." };
+  }
+
+  const newSchedule = JSON.parse(JSON.stringify(dykSchedule));
+  const sourceCell = newSchedule[groupId]?.[sourceDay]?.[sourceBlockId];
+  const targetCell = newSchedule[groupId]?.[targetDay]?.[targetBlockId];
+
+  if (!sourceCell) {
+    return { success: false, reason: "Kaynak ders hücresi boş." };
+  }
+
+  // Kaynak öğretmenin hedef slotta müsaitliği
+  const sourceTeacherCheck = isTeacherFreeInDyk({
+    dykSchedule: newSchedule,
+    teacherId: sourceCell.teacherId,
+    day: targetDay,
+    blockId: targetBlockId,
+    ignoreGroupId: groupId,
+    dykTeacherAvailabilities,
+    activeDays
+  });
+
+  if (!sourceTeacherCheck.free) {
+    return { success: false, reason: `${sourceCell.subject} öğretmeni için: ${sourceTeacherCheck.reason}` };
+  }
+
+  // Eğer hedef hücre doluysa, hedef öğretmenin kaynak slotta müsaitliği
+  if (targetCell) {
+    const targetTeacherCheck = isTeacherFreeInDyk({
+      dykSchedule: newSchedule,
+      teacherId: targetCell.teacherId,
+      day: sourceDay,
+      blockId: sourceBlockId,
+      ignoreGroupId: groupId,
+      dykTeacherAvailabilities,
+      activeDays
+    });
+
+    if (!targetTeacherCheck.free) {
+      return { success: false, reason: `${targetCell.subject} öğretmeni için: ${targetTeacherCheck.reason}` };
+    }
+  }
+
+  // Takas veya Taşıma
+  if (!newSchedule[groupId][targetDay]) newSchedule[groupId][targetDay] = {};
+  if (!newSchedule[groupId][sourceDay]) newSchedule[groupId][sourceDay] = {};
+
+  if (targetCell) {
+    newSchedule[groupId][targetDay][targetBlockId] = sourceCell;
+    newSchedule[groupId][sourceDay][sourceBlockId] = targetCell;
+  } else {
+    newSchedule[groupId][targetDay][targetBlockId] = sourceCell;
+    delete newSchedule[groupId][sourceDay][sourceBlockId];
+  }
+
+  return { success: true, newSchedule };
+};
+
+/**
+ * ⚡ AÇIKTA KALAN HAVUZ DERSİNİ MANUEL OLARAK ÇİZELGEYE YERLEŞTİR
+ */
+export const placeUnassignedDykActivity = ({
+  dykSchedule = {},
+  activity,
+  targetDay,
+  targetBlockId,
+  dykTeacherAvailabilities = {},
+  activeDays = []
+}) => {
+  if (!activity || !activity.groupId || !targetDay || !targetBlockId) {
+    return { success: false, reason: "Eksik parametre." };
+  }
+
+  const newSchedule = JSON.parse(JSON.stringify(dykSchedule));
+  if (!newSchedule[activity.groupId]) newSchedule[activity.groupId] = {};
+  if (!newSchedule[activity.groupId][targetDay]) newSchedule[activity.groupId][targetDay] = {};
+
+  // Hücre dolu mu?
+  if (newSchedule[activity.groupId][targetDay][targetBlockId]) {
+    return { success: false, reason: "Seçilen hücre zaten dolu. Önce takas yapınız veya boş bir hücre seçiniz." };
+  }
+
+  // Öğretmen müsait mi?
+  const teacherCheck = isTeacherFreeInDyk({
+    dykSchedule: newSchedule,
+    teacherId: activity.teacherId,
+    day: targetDay,
+    blockId: targetBlockId,
+    ignoreGroupId: activity.groupId,
+    dykTeacherAvailabilities,
+    activeDays
+  });
+
+  if (!teacherCheck.free) {
+    return { success: false, reason: teacherCheck.reason };
+  }
+
+  newSchedule[activity.groupId][targetDay][targetBlockId] = {
+    subject: activity.subject,
+    teacherId: activity.teacherId,
+    assignmentId: activity.assignmentId
+  };
+
+  return { success: true, newSchedule };
+};
+

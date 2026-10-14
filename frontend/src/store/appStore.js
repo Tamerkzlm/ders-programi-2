@@ -746,6 +746,7 @@ export const useAppStore = create(
         return res;
       },
       clearDykSchedule: () => set({ dykSchedule: null, dykResult: null }),
+      setDykResult: (newResult) => set((state) => ({ dykResult: { ...state.dykResult, ...newResult } })),
 
       // ==========================================
       // 🎓 OKUL ORTAK SINAV TAKVİMİ MODÜLÜ
