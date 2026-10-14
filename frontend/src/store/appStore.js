@@ -736,6 +736,12 @@ export const useAppStore = create(
         dykAssignments: state.dykAssignments.filter(a => a.groupId !== id)
       })),
       addDykAssignment: (assignment) => set((state) => ({ dykAssignments: [...state.dykAssignments, { ...assignment, id: newId('da') }] })),
+      addMultipleDykAssignments: (newAssignments) => set((state) => ({
+        dykAssignments: [
+          ...state.dykAssignments,
+          ...newAssignments.map(a => ({ ...a, id: newId('da') }))
+        ]
+      })),
       updateDykAssignment: (id, fields) => set((state) => ({ dykAssignments: state.dykAssignments.map(a => a.id === id ? { ...a, ...fields } : a) })),
       deleteDykAssignment: (id) => set((state) => ({ dykAssignments: state.dykAssignments.filter(a => a.id !== id) })),
       setDykTeacherAvailability: (teacherId, days) => set((state) => ({
