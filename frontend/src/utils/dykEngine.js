@@ -368,6 +368,67 @@ export const executeDykSwap = ({
 };
 
 /**
+ * 🔍 HAVUZ DERSİ İÇİN BELİRLİ BİR HÜCRENİN MÜSAİTLİK DURUMUNU KAPSAMLI DENETLER
+ * Manuel düzenlemede müsait yerlerin anında görselleştirilmesini sağlar.
+ */
+export const checkDykSlotAvailability = ({
+  activity,
+  targetGroupId,
+  targetDay,
+  targetBlockId,
+  dykSchedule = {},
+  dykTeacherAvailabilities = {},
+  dykGroups = []
+}) => {
+  if (!activity) return { canPlace: false, status: 'none', reason: '' };
+
+  // 1. Sınıf eşleşmesi (Havuzdaki ders yalnızca kendi sınıfına yerleştirilebilir)
+  if (targetGroupId && activity.groupId !== targetGroupId) {
+    const groupName = dykGroups.find(g => g.id === activity.groupId)?.name || 'kendi sınıfına';
+    return {
+      canPlace: false,
+      status: 'wrong_group',
+      reason: `Bu ders ${groupName} sınıfına aittir.`
+    };
+  }
+
+  // 2. Hedef hücre dolu mu?
+  const cell = dykSchedule?.[activity.groupId]?.[targetDay]?.[targetBlockId];
+  if (cell) {
+    return {
+      canPlace: false,
+      status: 'occupied',
+      reason: `Hücre dolu: ${cell.subject}`
+    };
+  }
+
+  // 3. Öğretmen bu saatte başka bir grupta meşgul mü? (Fiziksel Çakışma)
+  for (const gId of Object.keys(dykSchedule || {})) {
+    if (gId === activity.groupId) continue;
+    const otherCell = dykSchedule[gId]?.[targetDay]?.[targetBlockId];
+    if (otherCell && otherCell.teacherId === activity.teacherId) {
+      const otherGroupName = dykGroups.find(g => g.id === gId)?.name || gId;
+      return {
+        canPlace: false,
+        status: 'teacher_conflict',
+        reason: `Öğretmen bu saatte ${otherGroupName} sınıfında derste.`
+      };
+    }
+  }
+
+  // 4. Öğretmenin gün tercihi/onayı
+  const allowed = dykTeacherAvailabilities[activity.teacherId];
+  const isDayPreferred = !allowed || allowed.length === 0 || allowed.includes(targetDay);
+
+  return {
+    canPlace: true,
+    status: 'available',
+    isDayPreferred,
+    reason: isDayPreferred ? 'Müsait boş saat' : `Müsait (Öğretmenin DYK günlerine ${targetDay} eklenecektir)`
+  };
+};
+
+/**
  * ⚡ AÇIKTA KALAN HAVUZ DERSİNİ MANUEL OLARAK ÇİZELGEYE YERLEŞTİR
  */
 export const placeUnassignedDykActivity = ({
@@ -376,7 +437,8 @@ export const placeUnassignedDykActivity = ({
   targetDay,
   targetBlockId,
   dykTeacherAvailabilities = {},
-  activeDays = []
+  activeDays = [],
+  allowDayOverride = true
 }) => {
   if (!activity || !activity.groupId || !targetDay || !targetBlockId) {
     return { success: false, reason: "Eksik parametre." };
@@ -391,19 +453,27 @@ export const placeUnassignedDykActivity = ({
     return { success: false, reason: "Seçilen hücre zaten dolu. Önce takas yapınız veya boş bir hücre seçiniz." };
   }
 
-  // Öğretmen müsait mi?
-  const teacherCheck = isTeacherFreeInDyk({
-    dykSchedule: newSchedule,
-    teacherId: activity.teacherId,
-    day: targetDay,
-    blockId: targetBlockId,
-    ignoreGroupId: activity.groupId,
-    dykTeacherAvailabilities,
-    activeDays
-  });
+  // Öğretmen başka bir grupta o saatte derste mi?
+  for (const gId of Object.keys(newSchedule)) {
+    if (gId === activity.groupId) continue;
+    const cell = newSchedule[gId]?.[targetDay]?.[targetBlockId];
+    if (cell && cell.teacherId === activity.teacherId) {
+      return { success: false, reason: "Öğretmen bu saatte başka bir grupta derste." };
+    }
+  }
 
-  if (!teacherCheck.free) {
-    return { success: false, reason: teacherCheck.reason };
+  // Öğretmenin gün onayı kontrolü (Manuel yerleştirmede esnek yönetim)
+  const allowed = dykTeacherAvailabilities[activity.teacherId];
+  let updatedAvailabilities = null;
+  if (allowed && allowed.length > 0 && !allowed.includes(targetDay)) {
+    if (allowDayOverride) {
+      updatedAvailabilities = {
+        ...dykTeacherAvailabilities,
+        [activity.teacherId]: [...allowed, targetDay]
+      };
+    } else {
+      return { success: false, reason: "Öğretmenin bu gün için DYK onayı bulunmuyor." };
+    }
   }
 
   newSchedule[activity.groupId][targetDay][targetBlockId] = {
@@ -412,7 +482,12 @@ export const placeUnassignedDykActivity = ({
     assignmentId: activity.assignmentId
   };
 
-  return { success: true, newSchedule };
+  return { 
+    success: true, 
+    newSchedule,
+    updatedAvailabilities,
+    addedDay: updatedAvailabilities ? targetDay : null
+  };
 };
 
 /**

@@ -43,6 +43,7 @@ import {
   analyzeTeacherSchoolSchedule,
   executeDykSwap,
   placeUnassignedDykActivity,
+  checkDykSlotAvailability,
   isTeacherFreeInDyk,
   getDykBlockTimes,
   formatDykScheduleHeaderTimes
@@ -212,6 +213,46 @@ export default function DykPlanner() {
   const availableSchoolTeachersToAdd = useMemo(() => {
     return (teachers || []).filter(t => !dykEligibleTeachers.some(et => et.id === t.id));
   }, [teachers, dykEligibleTeachers]);
+
+  // 🎯 SADECE KURSTA DERSİ OLAN ÖĞRETMENLER (Öğretmen Bazlı Tablo & Çıktı İçin)
+  const teachersWithDykLessons = useMemo(() => {
+    const teacherIdsWithLessons = new Set();
+
+    // 1. Dağıtılmış programda (dykSchedule) yerleşen derslerin öğretmenleri
+    if (dykSchedule) {
+      Object.keys(dykSchedule).forEach(gId => {
+        const groupDays = dykSchedule[gId] || {};
+        Object.keys(groupDays).forEach(day => {
+          const blocksMap = groupDays[day] || {};
+          Object.keys(blocksMap).forEach(bId => {
+            const cell = blocksMap[bId];
+            if (cell && cell.teacherId) {
+              teacherIdsWithLessons.add(cell.teacherId);
+            }
+          });
+        });
+      });
+    }
+
+    // 2. Eğer henüz dağıtım yapılmadıysa veya açıkta havuzdaysa, en azından DYK ders ataması olan öğretmenler
+    if (teacherIdsWithLessons.size === 0 && dykAssignments && dykAssignments.length > 0) {
+      dykAssignments.forEach(a => {
+        if (a.teacherId) teacherIdsWithLessons.add(a.teacherId);
+      });
+    }
+
+    return (teachers || []).filter(t => teacherIdsWithLessons.has(t.id));
+  }, [dykSchedule, dykAssignments, teachers]);
+
+  // Seçili öğretmenin geçerliliği (Sadece kursta dersi olanlar arasında olmalı veya 'ALL' olmalı)
+  const effectiveTeacherId = useMemo(() => {
+    if (teachersWithDykLessons.length === 0) return '';
+    if (selectedTeacherId === 'ALL') return 'ALL';
+    if (selectedTeacherId && teachersWithDykLessons.some(t => t.id === selectedTeacherId)) {
+      return selectedTeacherId;
+    }
+    return teachersWithDykLessons[0]?.id || '';
+  }, [selectedTeacherId, teachersWithDykLessons]);
 
   // -------------------------------------------------------------
   // MENÜ 1: KURUM & ZAMAN STATE VE İŞLEMLERİ
@@ -593,9 +634,9 @@ export default function DykPlanner() {
     }
   };
 
-  // ⚡ Smart Swap Hücre Tıklama İşleyicisi
+  // ⚡ Smart Swap ve Manuel Yerleştirme Hücre Tıklama / Bırakma İşleyicisi
   const handleSlotClick = (groupId, day, blockId, currentCell) => {
-    // 1. Açıkta kalan havuz dersi seçiliyse:
+    // 1. Açıkta kalan havuz dersi seçiliyse / sürüklendiyse:
     if (selectedPoolActivity) {
       if (selectedPoolActivity.groupId !== groupId) {
         showToast(`Bu ders "${getGroupName(selectedPoolActivity.groupId)}" sınıfına ait. Yalnızca bu sınıfın çizelgesine yerleştirilebilir.`);
@@ -607,18 +648,29 @@ export default function DykPlanner() {
         targetDay: day,
         targetBlockId: blockId,
         dykTeacherAvailabilities,
-        activeDays
+        activeDays,
+        allowDayOverride: true
       });
 
       if (res.success) {
         setDykSchedule(res.newSchedule);
+        if (res.updatedAvailabilities) {
+          setDykTeacherAvailability(
+            selectedPoolActivity.teacherId,
+            res.updatedAvailabilities[selectedPoolActivity.teacherId]
+          );
+        }
         const remainingUnassigned = (dykResult?.unassigned || []).filter(a => a.id !== selectedPoolActivity.id);
         setDykResult({
           unassigned: remainingUnassigned,
           assignedCount: (dykResult?.assignedCount || 0) + 1,
           success: remainingUnassigned.length === 0
         });
-        showToast(`"${selectedPoolActivity.subject}" dersi ${day} gününe başarıyla yerleştirildi! 🎉`);
+        if (res.addedDay) {
+          showToast(`🎉 "${selectedPoolActivity.subject}" dersi ${day} gününe yerleştirildi! (Öğretmenin DYK günlerine ${day} eklendi)`);
+        } else {
+          showToast(`🎉 "${selectedPoolActivity.subject}" dersi ${day} gününe başarıyla yerleştirildi!`);
+        }
         setSelectedPoolActivity(null);
       } else {
         showToast(`Yerleştirilemedi: ${res.reason}`);
@@ -2305,7 +2357,7 @@ export default function DykPlanner() {
                         Yerleştirilmeyen Dersler Havuzu ({dykResult.unassigned.length} Blok)
                       </h3>
                       <p className="text-[11px] text-amber-800">
-                        Aşağıdaki dersler otomatik dağıtımda boş saat bulunamadığı için yerleştirilemedi. Bir derse tıklayıp aşağıdaki çizelgeden boş bir kurs saatine yerleştirebilir veya akıllı takas yapabilirsiniz.
+                        Aşağıdaki dersleri <strong>sürükleyip çizelgedeki yeşil (müsait) saatlere bırakabilir</strong> veya karta tıklayarak boş bir saate yerleştirebilirsiniz.
                       </p>
                     </div>
                   </div>
@@ -2325,11 +2377,21 @@ export default function DykPlanner() {
                     return (
                       <div
                         key={act.id}
-                        className={`p-3 rounded-2xl border transition-all flex flex-col justify-between gap-2 ${
+                        draggable={true}
+                        onDragStart={(e) => {
+                          setSelectedPoolActivity(act);
+                          setSelectedSwapSlot(null);
+                          setSelectedGroupId(act.groupId);
+                          setViewMode('group');
+                          e.dataTransfer.setData("application/json", JSON.stringify(act));
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        className={`p-3 rounded-2xl border transition-all flex flex-col justify-between gap-2 select-none cursor-grab active:cursor-grabbing ${
                           isSelected
                             ? 'bg-amber-100 border-amber-500 ring-2 ring-amber-500/40 shadow-sm'
-                            : 'bg-white border-amber-200 hover:border-amber-300 shadow-2xs'
+                            : 'bg-white border-amber-200 hover:border-amber-400 hover:shadow-xs shadow-2xs'
                         }`}
+                        title="Sürükleyip aşağıdaki yeşil renkli müsait bir saate bırakın veya butona tıklayın"
                       >
                         <div>
                           <div className="flex items-center justify-between">
@@ -2352,7 +2414,7 @@ export default function DykPlanner() {
                               setSelectedSwapSlot(null);
                               setSelectedGroupId(act.groupId);
                               setViewMode('group');
-                              showToast(`"${act.subject}" seçildi. Aşağıdaki çizelgeden boş bir kurs saatine tıklayın.`);
+                              showToast(`"${act.subject}" seçildi. Aşağıdaki çizelgede yeşil renkli müsait bir saate tıklayın.`);
                             }
                           }}
                           className={`w-full py-1.5 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
@@ -2362,7 +2424,7 @@ export default function DykPlanner() {
                           }`}
                         >
                           <Move size={13} />
-                          <span>{isSelected ? 'Seçili (Boş Yere Tıkla)' : 'Akıllı Yerleştir'}</span>
+                          <span>{isSelected ? 'Seçili (Müsait Yere Tıkla)' : 'Seç & Yerleştir'}</span>
                         </button>
                       </div>
                     );
@@ -2450,15 +2512,31 @@ export default function DykPlanner() {
               {viewMode === 'teacher' && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-slate-500">Öğretmen Seç:</span>
-                  <select
-                    value={selectedTeacherId || teachers?.[0]?.id}
-                    onChange={(e) => setSelectedTeacherId(e.target.value)}
-                    className="bg-slate-50 border border-slate-200 text-slate-900 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 cursor-pointer"
-                  >
-                    {teachers.map(t => (
-                      <option key={t.id} value={t.id}>{t.name} ({t.branch})</option>
-                    ))}
-                  </select>
+                  {teachersWithDykLessons.length === 0 ? (
+                    <span className="text-xs text-amber-700 font-bold bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200">
+                      Kursta dersi olan öğretmen bulunamadı
+                    </span>
+                  ) : (
+                    <select
+                      value={effectiveTeacherId}
+                      onChange={(e) => setSelectedTeacherId(e.target.value)}
+                      className="bg-slate-50 border border-slate-200 text-slate-900 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 cursor-pointer shadow-2xs"
+                    >
+                      {teachersWithDykLessons.length > 1 && (
+                        <option value="ALL">📋 Tüm Kurs Öğretmenleri ({teachersWithDykLessons.length} Öğretmen - Toplu)</option>
+                      )}
+                      {teachersWithDykLessons.map(t => {
+                        const assignedBlocks = dykAssignments
+                          .filter(a => a.teacherId === t.id)
+                          .reduce((sum, a) => sum + (Number(a.blocksPerWeek) || 1), 0);
+                        return (
+                          <option key={t.id} value={t.id}>
+                            {t.name} ({t.branch || 'Genel'} · {assignedBlocks} Blok)
+                          </option>
+                        );
+                      })}
+                    </select>
+                  )}
                 </div>
               )}
             </div>
@@ -2560,33 +2638,79 @@ export default function DykPlanner() {
                                 const isSwapActive = Boolean(selectedSwapSlot);
                                 const isPoolActive = Boolean(selectedPoolActivity);
 
+                                const slotAvailability = selectedPoolActivity
+                                  ? checkDykSlotAvailability({
+                                      activity: selectedPoolActivity,
+                                      targetGroupId: currentGroupId,
+                                      targetDay: day,
+                                      targetBlockId: block.id,
+                                      dykSchedule,
+                                      dykTeacherAvailabilities,
+                                      dykGroups
+                                    })
+                                  : null;
+
+                                const isAvailableForPool = Boolean(slotAvailability && slotAvailability.canPlace && !item);
+                                const isConflictForPool = Boolean(slotAvailability && !slotAvailability.canPlace && slotAvailability.status === 'teacher_conflict');
+
                                 return (
                                   <td
                                     key={day}
                                     onClick={() => handleSlotClick(currentGroupId, day, block.id, item)}
+                                    onDragOver={(e) => {
+                                      if (selectedPoolActivity || selectedSwapSlot) {
+                                        e.preventDefault();
+                                        e.dataTransfer.dropEffect = 'move';
+                                      }
+                                    }}
+                                    onDrop={(e) => {
+                                      e.preventDefault();
+                                      handleSlotClick(currentGroupId, day, block.id, item);
+                                    }}
                                     className={`p-3 border-r border-slate-200 last:border-r-0 print:border-black transition-all cursor-pointer select-none relative ${
                                       isSelected 
                                         ? 'bg-emerald-100 ring-2 ring-emerald-500 shadow-sm'
+                                        : isAvailableForPool
+                                        ? 'bg-emerald-50/90 hover:bg-emerald-100 border-2 border-dashed border-emerald-500 shadow-sm ring-2 ring-emerald-500/20'
+                                        : isConflictForPool
+                                        ? 'bg-rose-50/70 border border-rose-300 text-rose-800 cursor-not-allowed'
                                         : isSwapActive && !item
                                         ? 'bg-emerald-50/70 hover:bg-emerald-100/80 border-dashed border-emerald-400'
                                         : isSwapActive && item && !isSelected
                                         ? 'hover:bg-blue-50/80 border-dashed border-blue-400'
-                                        : isPoolActive && !item
-                                        ? 'bg-amber-50/70 hover:bg-amber-100/80 border-dashed border-amber-400'
+                                        : isPoolActive && item
+                                        ? 'opacity-50 hover:opacity-80'
                                         : 'hover:bg-slate-50/80'
                                     }`}
                                     title={
                                       isSelected
                                         ? "Seçili slot (İptal etmek için tekrar tıklayın)"
+                                        : isAvailableForPool
+                                        ? `✓ Müsait Kurs Saati: Bırakın veya tıklayarak yerleştirin (${times.startTime} - ${times.endTime})`
+                                        : isConflictForPool
+                                        ? `🚫 Meşgul: ${slotAvailability.reason}`
                                         : isSwapActive
                                         ? (item ? "Bu ders ile TAKAS ET" : "Bu boş saate TAŞI")
                                         : isPoolActive
-                                        ? (item ? "Dolu saat (Seçilemez)" : "Havuzdaki dersi BURAYA YERLEŞTİR")
+                                        ? (item ? "Dolu saat (Başka bir hücre seçiniz)" : "Havuzdaki dersi BURAYA YERLEŞTİR")
                                         : item ? `Akıllı Takas / Taşıma için Tıklayın (${times.startTime} - ${times.endTime})` : `Boş saat (${times.startTime} - ${times.endTime})`
                                     }
                                   >
                                     {item ? (
-                                      <div className={`p-2 rounded-xl border font-bold transition-all print:bg-white print:border print:border-black ${
+                                      <div 
+                                        draggable={true}
+                                        onDragStart={(e) => {
+                                          setSelectedSwapSlot({
+                                            groupId: currentGroupId,
+                                            day,
+                                            blockId: block.id,
+                                            cell: item
+                                          });
+                                          setSelectedPoolActivity(null);
+                                          e.dataTransfer.setData("application/json", JSON.stringify({ type: 'slot', groupId: currentGroupId, day, blockId: block.id }));
+                                          e.dataTransfer.effectAllowed = 'move';
+                                        }}
+                                        className={`p-2 rounded-xl border font-bold transition-all cursor-grab active:cursor-grabbing print:bg-white print:border print:border-black ${
                                         isSelected
                                           ? 'bg-emerald-600 text-white border-emerald-700 shadow-md scale-[1.02]'
                                           : 'bg-emerald-50/90 border-emerald-200 text-emerald-950 hover:border-emerald-400'
@@ -2616,13 +2740,31 @@ export default function DykPlanner() {
                                       </div>
                                     ) : (
                                       <div className="py-2 text-center">
-                                        {isSwapActive ? (
+                                        {isAvailableForPool ? (
+                                          <div className="animate-pulse">
+                                            <span className="text-[11px] font-black text-emerald-800 bg-emerald-100 px-2 py-1 rounded-lg border border-emerald-300 block shadow-2xs">
+                                              ✓ Müsait (Bırak / Tıkla)
+                                            </span>
+                                            <span className="text-[9px] font-semibold text-emerald-700 block mt-0.5">
+                                              {times.startTime} - {times.endTime}
+                                            </span>
+                                          </div>
+                                        ) : isConflictForPool ? (
+                                          <div>
+                                            <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded border border-rose-200 block">
+                                              🚫 Meşgul
+                                            </span>
+                                            <span className="text-[9px] text-rose-600 block mt-0.5 truncate" title={slotAvailability.reason}>
+                                              {slotAvailability.reason}
+                                            </span>
+                                          </div>
+                                        ) : isSwapActive ? (
                                           <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-1 rounded-lg border border-emerald-300 block print:hidden">
                                             + Buraya Taşı
                                           </span>
                                         ) : isPoolActive ? (
-                                          <span className="text-[11px] font-bold text-amber-700 bg-amber-100/80 px-2 py-1 rounded-lg border border-amber-300 block print:hidden">
-                                            + Buraya Yerleştir
+                                          <span className="text-[11px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 block print:hidden">
+                                            Seçilemez
                                           </span>
                                         ) : (
                                           <div>
@@ -2645,72 +2787,90 @@ export default function DykPlanner() {
                   </div>
                 )}
 
-                {/* 2. GÖRÜNÜM: ÖĞRETMEN BAZLI TABLO */}
+                {/* 2. GÖRÜNÜM: ÖĞRETMEN BAZLI TABLO (SADECE KURSTA DERSİ OLAN ÖĞRETMENLER) */}
                 {viewMode === 'teacher' && (
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center print:border-b print:pb-1">
-                      <h3 className="text-sm font-extrabold text-slate-900 print:text-black">
-                        Öğretmen: <span className="text-emerald-700 print:text-black font-black">{getTeacherName(selectedTeacherId || teachers?.[0]?.id)}</span>
-                      </h3>
-                      <span className="text-xs text-slate-500 font-semibold print:text-black">
-                        Kişisel DYK Kurs Çizelgesi
-                      </span>
-                    </div>
+                  <div className="space-y-6">
+                    {teachersWithDykLessons.length === 0 ? (
+                      <div className="p-12 text-center rounded-3xl bg-slate-50 border border-slate-200 text-slate-500 text-xs space-y-2">
+                        <div className="text-2xl">👨‍🏫</div>
+                        <div className="font-bold text-slate-700">Henüz DYK Kursunda Dersi Olan Öğretmen Bulunmuyor</div>
+                        <p className="text-slate-400">
+                          Öğretmen bazlı çizelgeyi görüntülemek için önce "4. Ders & Atamalar" menüsünden ders ataması yapıp dağıtım motorunu çalıştırın.
+                        </p>
+                      </div>
+                    ) : (
+                      (effectiveTeacherId === 'ALL' 
+                        ? teachersWithDykLessons 
+                        : teachersWithDykLessons.filter(t => t.id === effectiveTeacherId)
+                      ).map((curTeacher) => (
+                        <div key={curTeacher.id} className="space-y-3 print:break-after-page">
+                          <div className="flex justify-between items-center print:border-b print:pb-1">
+                            <h3 className="text-sm font-extrabold text-slate-900 print:text-black flex items-center gap-2">
+                              <span>Öğretmen:</span>
+                              <span className="text-emerald-700 print:text-black font-black">{curTeacher.name}</span>
+                              <span className="text-xs text-slate-500 font-normal">({curTeacher.branch || 'Genel'})</span>
+                            </h3>
+                            <span className="text-xs text-slate-500 font-semibold print:text-black">
+                              Kişisel DYK Kurs Çizelgesi
+                            </span>
+                          </div>
 
-                    <div className="overflow-x-auto border border-slate-200 rounded-2xl print:border-black print:rounded-none">
-                      <table className="w-full text-center text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold print:bg-white print:border-black">
-                            <th className="p-3 border-r border-slate-200 text-left font-black print:border-black">Kurs Blokları</th>
-                            {activeDays.map(day => (
-                              <th key={day} className="p-3 border-r border-slate-200 last:border-r-0 font-extrabold print:border-black">
-                                {day}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 print:divide-black">
-                          {blocks.map(block => (
-                            <tr key={block.id} className="hover:bg-slate-50/50 print:border-b print:border-black">
-                              <td className="p-3 text-left border-r border-slate-200 bg-slate-50/80 font-bold text-slate-800 print:bg-white print:border-black">
-                                <div>{block.name}</div>
-                                <div className="text-[10px] text-slate-400 font-mono print:text-gray-600">
-                                  {block.startTime} - {block.endTime}
-                                </div>
-                              </td>
-                              {activeDays.map(day => {
-                                const currentTId = selectedTeacherId || teachers?.[0]?.id;
-                                // dykSchedule içinde bu öğretmenin dersini bul
-                                let found = null;
-                                Object.keys(dykSchedule || {}).forEach(gId => {
-                                  const cell = dykSchedule[gId]?.[day]?.[block.id];
-                                  if (cell && cell.teacherId === currentTId) {
-                                    found = { ...cell, groupName: getGroupName(gId) };
-                                  }
-                                });
-
-                                return (
-                                  <td key={day} className="p-3 border-r border-slate-200 last:border-r-0 print:border-black">
-                                    {found ? (
-                                      <div className="p-2 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 font-bold print:bg-white print:border print:border-black">
-                                        <div className="text-xs font-black text-blue-900 print:text-black">
-                                          {found.subject}
-                                        </div>
-                                        <div className="text-[11px] text-slate-600 print:text-black font-semibold mt-0.5">
-                                          {found.groupName}
-                                        </div>
+                          <div className="overflow-x-auto border border-slate-200 rounded-2xl print:border-black print:rounded-none">
+                            <table className="w-full text-center text-xs border-collapse">
+                              <thead>
+                                <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold print:bg-white print:border-black">
+                                  <th className="p-3 border-r border-slate-200 text-left font-black print:border-black">Kurs Blokları</th>
+                                  {activeDays.map(day => (
+                                    <th key={day} className="p-3 border-r border-slate-200 last:border-r-0 font-extrabold print:border-black">
+                                      {day}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 print:divide-black">
+                                {blocks.map(block => (
+                                  <tr key={block.id} className="hover:bg-slate-50/50 print:border-b print:border-black">
+                                    <td className="p-3 text-left border-r border-slate-200 bg-slate-50/80 font-bold text-slate-800 print:bg-white print:border-black">
+                                      <div>{block.name}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono print:text-gray-600">
+                                        {block.startTime} - {block.endTime}
                                       </div>
-                                    ) : (
-                                      <span className="text-slate-300 font-bold print:text-gray-400">—</span>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                                    </td>
+                                    {activeDays.map(day => {
+                                      // dykSchedule içinde bu öğretmenin dersini bul
+                                      let found = null;
+                                      Object.keys(dykSchedule || {}).forEach(gId => {
+                                        const cell = dykSchedule[gId]?.[day]?.[block.id];
+                                        if (cell && cell.teacherId === curTeacher.id) {
+                                          found = { ...cell, groupName: getGroupName(gId) };
+                                        }
+                                      });
+
+                                      return (
+                                        <td key={day} className="p-3 border-r border-slate-200 last:border-r-0 print:border-black">
+                                          {found ? (
+                                            <div className="p-2 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 font-bold print:bg-white print:border print:border-black">
+                                              <div className="text-xs font-black text-blue-900 print:text-black">
+                                                {found.subject}
+                                              </div>
+                                              <div className="text-[11px] text-slate-600 print:text-black font-semibold mt-0.5">
+                                                {found.groupName}
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-300 font-bold print:text-gray-400">—</span>
+                                          )}
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 )}
 
@@ -2780,33 +2940,82 @@ export default function DykPlanner() {
                                     const isSwapActive = Boolean(selectedSwapSlot);
                                     const isPoolActive = Boolean(selectedPoolActivity);
 
+                                    const slotAvailability = selectedPoolActivity
+                                      ? checkDykSlotAvailability({
+                                          activity: selectedPoolActivity,
+                                          targetGroupId: group.id,
+                                          targetDay: day,
+                                          targetBlockId: b.id,
+                                          dykSchedule,
+                                          dykTeacherAvailabilities,
+                                          dykGroups
+                                        })
+                                      : null;
+
+                                    const isAvailableForPool = Boolean(slotAvailability && slotAvailability.canPlace && !cell);
+                                    const isConflictForPool = Boolean(slotAvailability && !slotAvailability.canPlace && slotAvailability.status === 'teacher_conflict');
+                                    const isWrongGroup = Boolean(slotAvailability && slotAvailability.status === 'wrong_group');
+
                                     return (
                                       <td
                                         key={b.id}
                                         onClick={() => handleSlotClick(group.id, day, b.id, cell)}
+                                        onDragOver={(e) => {
+                                          if (selectedPoolActivity || selectedSwapSlot) {
+                                            e.preventDefault();
+                                            e.dataTransfer.dropEffect = 'move';
+                                          }
+                                        }}
+                                        onDrop={(e) => {
+                                          e.preventDefault();
+                                          handleSlotClick(group.id, day, b.id, cell);
+                                        }}
                                         className={`p-1.5 border-r border-slate-200 last:border-r-0 print:border-black min-w-[95px] transition-all cursor-pointer select-none relative ${
                                           isSelected
                                             ? 'bg-emerald-100 ring-2 ring-emerald-500'
+                                            : isAvailableForPool
+                                            ? 'bg-emerald-50 border-2 border-dashed border-emerald-500 shadow-sm ring-2 ring-emerald-500/20'
+                                            : isConflictForPool
+                                            ? 'bg-rose-50/70 border border-rose-300 text-rose-800 cursor-not-allowed'
+                                            : isWrongGroup
+                                            ? 'opacity-35 cursor-not-allowed'
                                             : isSwapActive && !cell && selectedSwapSlot.groupId === group.id
                                             ? 'bg-emerald-50/80 hover:bg-emerald-100 border-dashed border-emerald-400'
                                             : isSwapActive && cell && selectedSwapSlot.groupId === group.id && !isSelected
                                             ? 'hover:bg-blue-50/80 border-dashed border-blue-400'
-                                            : isPoolActive && !cell && selectedPoolActivity.groupId === group.id
-                                            ? 'bg-amber-50/80 hover:bg-amber-100 border-dashed border-amber-400'
+                                            : isPoolActive && cell
+                                            ? 'opacity-50'
                                             : 'hover:bg-slate-50/80'
                                         }`}
                                         title={
                                           isSelected
                                             ? "Seçili slot"
+                                            : isAvailableForPool
+                                            ? `✓ Müsait: ${times.startTime} - ${times.endTime} (Bırakın veya tıklayın)`
+                                            : isConflictForPool
+                                            ? `🚫 Meşgul: ${slotAvailability.reason}`
+                                            : isWrongGroup
+                                            ? `Bu ders ${getGroupName(selectedPoolActivity.groupId)} sınıfına ait`
                                             : isSwapActive && selectedSwapSlot.groupId === group.id
                                             ? (cell ? "Takas Et" : "Buraya Taşı")
-                                            : isPoolActive && selectedPoolActivity.groupId === group.id
-                                            ? (cell ? "Dolu" : "Buraya Yerleştir")
                                             : cell ? `Seçmek için tıklayın (${times.startTime} - ${times.endTime})` : `Boş (${times.startTime} - ${times.endTime})`
                                         }
                                       >
                                         {cell ? (
-                                          <div className={`p-1 rounded font-semibold text-[10px] border transition-all print:bg-white print:border-black ${
+                                          <div 
+                                            draggable={true}
+                                            onDragStart={(e) => {
+                                              setSelectedSwapSlot({
+                                                groupId: group.id,
+                                                day,
+                                                blockId: b.id,
+                                                cell
+                                              });
+                                              setSelectedPoolActivity(null);
+                                              e.dataTransfer.setData("application/json", JSON.stringify({ type: 'slot', groupId: group.id, day, blockId: b.id }));
+                                              e.dataTransfer.effectAllowed = 'move';
+                                            }}
+                                            className={`p-1 rounded font-semibold text-[10px] border transition-all cursor-grab active:cursor-grabbing print:bg-white print:border-black ${
                                             isSelected
                                               ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
                                               : 'bg-emerald-50 border-emerald-200 text-emerald-950'
@@ -2823,13 +3032,17 @@ export default function DykPlanner() {
                                           </div>
                                         ) : (
                                           <div className="py-1 text-center">
-                                            {isSwapActive && selectedSwapSlot.groupId === group.id ? (
+                                            {isAvailableForPool ? (
+                                              <span className="text-[9px] font-black text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300 block shadow-2xs animate-pulse">
+                                                ✓ Müsait
+                                              </span>
+                                            ) : isConflictForPool ? (
+                                              <span className="text-[8px] font-bold text-rose-700 bg-rose-100 px-1 py-0.5 rounded border border-rose-200 block truncate" title={slotAvailability.reason}>
+                                                🚫 Meşgul
+                                              </span>
+                                            ) : isSwapActive && selectedSwapSlot.groupId === group.id ? (
                                               <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-300 block print:hidden">
                                                 +Taşı
-                                              </span>
-                                            ) : isPoolActive && selectedPoolActivity.groupId === group.id ? (
-                                              <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1 py-0.5 rounded border border-amber-300 block print:hidden">
-                                                +Ekle
                                               </span>
                                             ) : (
                                               <span className="text-slate-200 print:text-gray-300">—</span>
