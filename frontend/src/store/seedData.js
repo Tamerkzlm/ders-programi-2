@@ -3,23 +3,26 @@ import { generateCourseCode } from '../utils/courseCodeHelper';
 
 // 🎯 DYK (DESTEKLEME VE YETİŞTİRME KURSU) VARSAYILAN VERİLERİ
 export const DEFAULT_DYK_GROUPS = [
-  { id: "dg1", name: "12-A Sayısal Grubu", grade: "12" },
-  { id: "dg2", name: "12-B Eşit Ağırlık Grubu", grade: "12" },
-  { id: "dg3", name: "11-A Sayısal Grubu", grade: "11" },
-  { id: "dg4", name: "8-A LGS Hazırlık Grubu", grade: "8" }
+  { id: "dg_11a_say", name: "11A Say", grade: "11", branch: "SAY" },
+  { id: "dg_11b_say", name: "11B Say", grade: "11", branch: "SAY" },
+  { id: "dg_11c_ea", name: "11C EA", grade: "11", branch: "EA" },
+  { id: "dg_11d_ea", name: "11D EA", grade: "11", branch: "EA" },
+  { id: "dg_12a_say", name: "12A Say", grade: "12", branch: "SAY" },
+  { id: "dg_12b_say", name: "12B Say", grade: "12", branch: "SAY" },
+  { id: "dg_12c_ea", name: "12C EA", grade: "12", branch: "EA" },
+  { id: "dg_12d_ea", name: "12D EA", grade: "12", branch: "EA" }
 ];
 
 export const DEFAULT_DYK_ASSIGNMENTS = [
-  { id: "da1", groupId: "dg1", teacherId: "t5", subject: "Matematik (AYT)", blocksPerWeek: 2 },
-  { id: "da2", groupId: "dg1", teacherId: "t8", subject: "Fizik (AYT)", blocksPerWeek: 1 },
-  { id: "da3", groupId: "dg1", teacherId: "t10", subject: "Kimya (AYT)", blocksPerWeek: 1 },
-  { id: "da4", groupId: "dg1", teacherId: "t12", subject: "Biyoloji (AYT)", blocksPerWeek: 1 },
-  { id: "da5", groupId: "dg2", teacherId: "t2", subject: "Edebiyat (AYT)", blocksPerWeek: 2 },
-  { id: "da6", groupId: "dg2", teacherId: "t5", subject: "Matematik (AYT)", blocksPerWeek: 2 },
-  { id: "da7", groupId: "dg2", teacherId: "t13", subject: "Coğrafya (AYT)", blocksPerWeek: 1 },
-  { id: "da8", groupId: "dg3", teacherId: "t24", subject: "Matematik (11)", blocksPerWeek: 2 },
-  { id: "da9", groupId: "dg3", teacherId: "t8", subject: "Fizik (11)", blocksPerWeek: 1 },
-  { id: "da10", groupId: "dg4", teacherId: "t25", subject: "Matematik (LGS)", blocksPerWeek: 2 }
+  { id: "da1", groupId: "dg_12a_say", teacherId: "t5", subject: "Matematik (AYT)", blocksPerWeek: 2 },
+  { id: "da2", groupId: "dg_12a_say", teacherId: "t8", subject: "Fizik (AYT)", blocksPerWeek: 1 },
+  { id: "da3", groupId: "dg_12a_say", teacherId: "t10", subject: "Kimya (AYT)", blocksPerWeek: 1 },
+  { id: "da4", groupId: "dg_12a_say", teacherId: "t12", subject: "Biyoloji (AYT)", blocksPerWeek: 1 },
+  { id: "da5", groupId: "dg_12c_ea", teacherId: "t2", subject: "Edebiyat (AYT)", blocksPerWeek: 2 },
+  { id: "da6", groupId: "dg_12c_ea", teacherId: "t5", subject: "Matematik (AYT)", blocksPerWeek: 2 },
+  { id: "da7", groupId: "dg_12c_ea", teacherId: "t13", subject: "Coğrafya (AYT)", blocksPerWeek: 1 },
+  { id: "da8", groupId: "dg_11a_say", teacherId: "t24", subject: "Matematik (11)", blocksPerWeek: 2 },
+  { id: "da9", groupId: "dg_11a_say", teacherId: "t8", subject: "Fizik (11)", blocksPerWeek: 1 }
 ];
 
 export const DEFAULT_DYK_AVAILABILITIES = {

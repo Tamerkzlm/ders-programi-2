@@ -702,13 +702,15 @@ export const useAppStore = create(
       })),
       setDykSchedule: (schedule) => set({ dykSchedule: schedule }),
       generateDykSchedule: () => {
-        const { dykGroups, dykAssignments, dykTeacherAvailabilities, dykSettings, teachers } = get();
+        const { dykGroups, dykAssignments, dykTeacherAvailabilities, dykSettings, teachers, timetable, settings } = get();
         const res = solveDykSchedule({
           dykGroups,
           dykAssignments,
           dykTeacherAvailabilities,
           dykSettings,
-          teachers
+          teachers,
+          timetable,
+          settings
         });
         set({
           dykSchedule: res.schedule,
@@ -716,7 +718,8 @@ export const useAppStore = create(
             success: res.success,
             unassigned: res.unassigned,
             totalActivities: res.totalActivities,
-            assignedCount: res.assignedCount
+            assignedCount: res.assignedCount,
+            teacherSchoolAnalysis: res.teacherSchoolAnalysis
           }
         });
         return res;
