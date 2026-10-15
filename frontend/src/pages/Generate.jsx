@@ -335,41 +335,49 @@ export default function Generate() {
                 <div className="text-[9px] text-slate-400">Merkez Değer</div>
               </div>
 
-              {/* 📅 BOŞ GÜN VERİLMEYEN */}
+              {/* 📅 BOŞ GÜN İSTEĞİ */}
               <div className={`p-2.5 rounded-xl font-bold border flex flex-col justify-between ${
                 (metrics?.countWithoutFreeDay || 0) > 0 
                   ? 'bg-rose-50/70 border-rose-200' 
                   : 'bg-emerald-50/70 border-emerald-200'
               }`}>
-                <div className="text-[10px] text-slate-500 font-extrabold uppercase">BOŞ GÜN VERİLMEYEN</div>
+                <div className="text-[10px] text-slate-500 font-extrabold uppercase">BOŞ GÜN İSTEĞİ</div>
                 <div className={`text-sm font-black ${
                   (metrics?.countWithoutFreeDay || 0) > 0 ? 'text-rose-700' : 'text-emerald-700'
                 }`}>
-                  {metrics?.countWithoutFreeDay ?? 0} Kişi
+                  {(metrics?.countWithoutFreeDay || 0) > 0 
+                    ? `${metrics.countWithoutFreeDay} Açıkta` 
+                    : '0 Kişi'}
                 </div>
                 <div className="text-[9px] text-slate-500">
-                  {(metrics?.floatingDayFailed || 0) > 0 
-                    ? `(${metrics.floatingDayFailed} kayan talep)` 
-                    : 'Haftanın tümü dolu'}
+                  {(metrics?.countWithoutFreeDay || 0) > 0
+                    ? `${metrics.requestedFreeDayCount || 0} talep içinden`
+                    : (metrics?.requestedFreeDayCount || 0) > 0
+                      ? `${metrics.requestedFreeDayCount} talep sağlandı ✓`
+                      : 'Talep bulunmuyor'}
                 </div>
               </div>
 
-              {/* ☀️ YARIM GÜN BOŞ VERİLMEYEN */}
+              {/* ☀️ YARIM GÜN İSTEĞİ */}
               <div className={`p-2.5 rounded-xl font-bold border flex flex-col justify-between ${
                 (metrics?.countWithoutHalfDay || 0) > 0 
                   ? 'bg-amber-50/70 border-amber-200' 
                   : 'bg-emerald-50/70 border-emerald-200'
               }`}>
-                <div className="text-[10px] text-slate-500 font-extrabold uppercase">YARIM GÜN VERİLMEYEN</div>
+                <div className="text-[10px] text-slate-500 font-extrabold uppercase">YARIM GÜN İSTEĞİ</div>
                 <div className={`text-sm font-black ${
                   (metrics?.countWithoutHalfDay || 0) > 0 ? 'text-amber-700' : 'text-emerald-700'
                 }`}>
-                  {metrics?.countWithoutHalfDay ?? 0} Kişi
+                  {(metrics?.countWithoutHalfDay || 0) > 0 
+                    ? `${metrics.countWithoutHalfDay} Açıkta` 
+                    : '0 Kişi'}
                 </div>
                 <div className="text-[9px] text-slate-500">
-                  {(metrics?.floatingHalfFailed || 0) > 0 
-                    ? `(${metrics.floatingHalfFailed} kayan talep)` 
-                    : 'Sabah & öğle dolu'}
+                  {(metrics?.countWithoutHalfDay || 0) > 0
+                    ? `${metrics.requestedHalfDayCount || 0} talep içinden`
+                    : (metrics?.requestedHalfDayCount || 0) > 0
+                      ? `${metrics.requestedHalfDayCount} talep sağlandı ✓`
+                      : 'Talep bulunmuyor'}
                 </div>
               </div>
             </div>
@@ -406,7 +414,7 @@ export default function Generate() {
         )}
       </div>
 
-      {/* 📋 NİHAİ RAPOR: BOŞ GÜN & YARIM GÜN BOŞLUK DETAYLI ANALİZİ */}
+      {/* 📋 NİHAİ RAPOR: ÖĞRETMEN TERCİH & MEMNUNİYET ANALİZİ */}
       {!isGenerating && generateResult && generateResult.success && metrics && (
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
@@ -414,27 +422,27 @@ export default function Generate() {
               <CalendarDays size={18} className="text-indigo-600" />
               <div>
                 <h2 className="text-xs font-black text-slate-900 uppercase tracking-wider">
-                  Nihai Rapor: Boş Gün & Yarım Gün Dağılım İstatistiği
+                  Nihai Rapor: Öğretmen Tercih & Memnuniyet Analizi
                 </h2>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Öğretmenlerin haftalık tam boş gün ve yarım gün (sabah serbest / öğleden sonra serbest) durumları
+                  Öğretmenlerin bildirdiği boş gün ve yarım gün boşluk taleplerinin dağıtım motoru tarafından karşılanma durumu
                 </p>
               </div>
             </div>
 
-            {/* Kayan Tercih Başarı Özeti */}
-            {((metrics.floatingDayRequested || 0) > 0 || (metrics.floatingHalfRequested || 0) > 0) && (
+            {/* Toplam Talep Durumu */}
+            {((metrics.requestedFreeDayCount || 0) > 0 || (metrics.requestedHalfDayCount || 0) > 0) && (
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold px-2.5 py-1 rounded-xl bg-cyan-50 text-cyan-800 border border-cyan-200 flex items-center gap-1">
-                  <Waves size={12} className="text-cyan-600" />
-                  Kayan Tercih: {(metrics.floatingDayRequested || 0) + (metrics.floatingHalfRequested || 0)} Talep | {((metrics.floatingDayFailed || 0) + (metrics.floatingHalfFailed || 0)) === 0 ? 'Tümü Sağlandı ✓' : `${(metrics.floatingDayFailed || 0) + (metrics.floatingHalfFailed || 0)} Sağlanamadı`}
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-xl bg-indigo-50 text-indigo-800 border border-indigo-200 flex items-center gap-1">
+                  <Waves size={12} className="text-indigo-600" />
+                  Toplam Tercih: {(metrics.requestedFreeDayCount || 0) + (metrics.requestedHalfDayCount || 0)} Talep | {((metrics.countWithoutFreeDay || 0) + (metrics.countWithoutHalfDay || 0)) === 0 ? 'Tümü Sağlandı ✓' : `${(metrics.countWithoutFreeDay || 0) + (metrics.countWithoutHalfDay || 0)} Karşılanamadı`}
                 </span>
               </div>
             )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* KART 1: BOŞ GÜN VERİLMEYENLER */}
+            {/* KART 1: BOŞ GÜN İSTEYİP VERİLMEYENLER */}
             <div className={`p-4 rounded-xl border flex flex-col justify-between ${
               (metrics.countWithoutFreeDay || 0) > 0 
                 ? 'bg-rose-50/40 border-rose-200' 
@@ -444,47 +452,64 @@ export default function Generate() {
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
                     <Calendar size={14} className={(metrics.countWithoutFreeDay || 0) > 0 ? "text-rose-600" : "text-emerald-600"} />
-                    Boş Günü Olmayan Öğretmenler
+                    Boş Gün İsteyip Verilemeyenler
                   </span>
                   <span className={`text-xs font-black px-2 py-0.5 rounded-full ${
                     (metrics.countWithoutFreeDay || 0) > 0 
                       ? 'bg-rose-100 text-rose-800' 
                       : 'bg-emerald-100 text-emerald-800'
                   }`}>
-                    {metrics.countWithoutFreeDay ?? 0} Kişi
+                    {(metrics.countWithoutFreeDay || 0) > 0 
+                      ? `${metrics.countWithoutFreeDay} Açıkta / ${metrics.requestedFreeDayCount || 0} Talep` 
+                      : `${metrics.requestedFreeDayCount || 0} Talep Karşılandı`}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
-                  Haftanın tüm günlerinde dersi olan ve okulda tam boş günü bulunmayan öğretmenler.
+                  Boş gün talep ettiği halde (esnek 1/2 gün veya sabit kapalı gün) ders yükü nedeniyle tüm günlere dersi yerleşen öğretmenler.
                 </p>
 
                 {metrics.teachersWithoutFreeDay && metrics.teachersWithoutFreeDay.length > 0 ? (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
                     {metrics.teachersWithoutFreeDay.map((t, idx) => (
                       <div 
                         key={t.id || idx}
                         onClick={() => navigate('/timetable', { state: { teacherId: t.id, viewMode: 'teacher' } })}
-                        className="p-2 rounded-lg bg-white border border-slate-200 hover:border-indigo-400 hover:shadow-2xs flex items-center justify-between text-xs cursor-pointer transition-all group"
+                        className="p-2.5 rounded-lg bg-white border border-rose-200 hover:border-rose-400 hover:shadow-2xs flex flex-col gap-1 text-xs cursor-pointer transition-all group"
                       >
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="font-bold text-slate-800 group-hover:text-indigo-600 truncate">{t.name}</span>
-                          <ArrowRight size={11} className="text-slate-400 group-hover:text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="font-bold text-slate-800 group-hover:text-rose-700 truncate">{t.name}</span>
+                            <ArrowRight size={11} className="text-slate-400 group-hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-50 text-rose-700 shrink-0">
+                            {t.load} Saat
+                          </span>
                         </div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0">
-                          {t.load} Sa / {t.activeDays || 5} Gün
-                        </span>
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                            {t.requested || 'Boş Gün Talebi'}
+                          </span>
+                          <span className="text-rose-600 font-semibold truncate ml-2">
+                            {t.reason}
+                          </span>
+                        </div>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className="text-emerald-700 font-bold text-xs bg-emerald-100/60 p-2.5 rounded-lg flex items-center gap-2">
-                    <CheckCircle2 size={15} /> Harika! Tüm öğretmenlerin en az 1 tam boş günü var.
+                    <CheckCircle2 size={15} /> 
+                    <span>
+                      {(metrics.requestedFreeDayCount || 0) > 0 
+                        ? `Harika! Boş gün talep eden tüm öğretmenlerin (${metrics.requestedFreeDayCount} öğretmen) isteği eksiksiz sağlandı.`
+                        : 'Kadroda boş gün talep eden öğretmen bulunmuyor (dersler haftaya dengeli dağıtıldı).'}
+                    </span>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* KART 2: YARIM GÜN VERİLMEYENLER */}
+            {/* KART 2: YARIM GÜN İSTEYİP VERİLMEYENLER */}
             <div className={`p-4 rounded-xl border flex flex-col justify-between ${
               (metrics.countWithoutHalfDay || 0) > 0 
                 ? 'bg-amber-50/40 border-amber-200' 
@@ -494,70 +519,71 @@ export default function Generate() {
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
                     <Clock size={14} className={(metrics.countWithoutHalfDay || 0) > 0 ? "text-amber-600" : "text-emerald-600"} />
-                    Yarım Gün Boşluğu Olmayanlar
+                    Yarım Gün İsteyip Verilemeyenler
                   </span>
                   <span className={`text-xs font-black px-2 py-0.5 rounded-full ${
                     (metrics.countWithoutHalfDay || 0) > 0 
                       ? 'bg-amber-100 text-amber-800' 
                       : 'bg-emerald-100 text-emerald-800'
                   }`}>
-                    {metrics.countWithoutHalfDay ?? 0} Kişi
+                    {(metrics.countWithoutHalfDay || 0) > 0 
+                      ? `${metrics.countWithoutHalfDay} Açıkta / ${metrics.requestedHalfDayCount || 0} Talep` 
+                      : `${metrics.requestedHalfDayCount || 0} Talep Karşılandı`}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
-                  Hiçbir gün sabahı (geç geliş) veya öğleden sonrası (erken çıkış) serbest olmayan öğretmenler.
+                  Öğleden sonra veya sabah boşluk talep ettiği halde tüm aktif günlerde hem sabah hem öğleden sonra dersi olan öğretmenler.
                 </p>
 
                 {metrics.teachersWithoutHalfDay && metrics.teachersWithoutHalfDay.length > 0 ? (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
                     {metrics.teachersWithoutHalfDay.map((t, idx) => (
                       <div 
                         key={t.id || idx}
                         onClick={() => navigate('/timetable', { state: { teacherId: t.id, viewMode: 'teacher' } })}
-                        className="p-2 rounded-lg bg-white border border-slate-200 hover:border-indigo-400 hover:shadow-2xs flex items-center justify-between text-xs cursor-pointer transition-all group"
+                        className="p-2.5 rounded-lg bg-white border border-amber-200 hover:border-amber-400 hover:shadow-2xs flex flex-col gap-1 text-xs cursor-pointer transition-all group"
                       >
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="font-bold text-slate-800 group-hover:text-indigo-600 truncate">{t.name}</span>
-                          <ArrowRight size={11} className="text-slate-400 group-hover:text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="font-bold text-slate-800 group-hover:text-amber-700 truncate">{t.name}</span>
+                            <ArrowRight size={11} className="text-slate-400 group-hover:text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700 shrink-0">
+                            {t.load} Saat
+                          </span>
                         </div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 shrink-0">
-                          {t.load} Sa Yük
-                        </span>
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                            {t.requested || 'Yarım Gün Talebi'}
+                          </span>
+                          <span className="text-amber-700 font-semibold truncate ml-2">
+                            {t.reason}
+                          </span>
+                        </div>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className="text-emerald-700 font-bold text-xs bg-emerald-100/60 p-2.5 rounded-lg flex items-center gap-2">
-                    <CheckCircle2 size={15} /> Harika! Tüm öğretmenlerin en az 1 yarım günü serbest.
+                    <CheckCircle2 size={15} /> 
+                    <span>
+                      {(metrics.requestedHalfDayCount || 0) > 0 
+                        ? `Harika! Yarım gün talep eden tüm öğretmenlerin (${metrics.requestedHalfDayCount} öğretmen) isteği eksiksiz sağlandı.`
+                        : 'Kadroda yarım gün boşluk talep eden öğretmen bulunmuyor.'}
+                    </span>
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Kayan Tercih Verilemeyenler Özel Uyarısı */}
-          {((metrics.floatingDayFailed || 0) > 0 || (metrics.floatingHalfFailed || 0) > 0) && (
-            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-2 text-xs">
-              <div className="font-bold text-amber-900 flex items-center gap-1.5">
-                <AlertTriangle size={14} className="text-amber-700" />
-                <span>Kayan Tercih Bildirip Karşılanamayan Öğretmenler:</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                {metrics.floatingDayFailedTeachers?.map((ft, idx) => (
-                  <div key={idx} className="p-2 rounded-lg bg-white border border-amber-200 flex justify-between">
-                    <span className="font-bold text-slate-800">{ft.name}</span>
-                    <span className="text-rose-600 font-medium">{ft.reason}</span>
-                  </div>
-                ))}
-                {metrics.floatingHalfFailedTeachers?.map((ft, idx) => (
-                  <div key={idx} className="p-2 rounded-lg bg-white border border-amber-200 flex justify-between">
-                    <span className="font-bold text-slate-800">{ft.name}</span>
-                    <span className="text-amber-700 font-medium">{ft.reason}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* İdareci Kılavuzu & Bilgilendirme Notu */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 flex items-start gap-2 leading-relaxed">
+            <span className="font-bold text-indigo-600 text-xs shrink-0">💡 İdareci Notu:</span>
+            <span>
+              Bir öğretmenin haftada 5 gün gelmesi ve yalnızca belirli saatlerini (örneğin ilk 2 saati) kapatmış olması öğretmenin kendi çalışma tercihidir. Dağıtım motoru bu kapalı saatleri korurken; bu raporda yalnızca açıkça <strong>tam boş gün</strong> veya <strong>yarım gün boşluk</strong> talep edip ders yoğunluğu nedeniyle isteği yerine getirilemeyen öğretmenler listelenir.
+            </span>
+          </div>
         </div>
       )}
 

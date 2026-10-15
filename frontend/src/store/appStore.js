@@ -37,8 +37,10 @@ export const calculateLiveMetrics = (timetable, teachers = [], classrooms = [], 
       gapReport: {},
       countWithoutFreeDay: 0,
       teachersWithoutFreeDay: [],
+      requestedFreeDayCount: 0,
       countWithoutHalfDay: 0,
       teachersWithoutHalfDay: [],
+      requestedHalfDayCount: 0,
       floatingDayRequested: 0,
       floatingDayFailed: 0,
       floatingDayFailedTeachers: [],
@@ -127,6 +129,8 @@ export const calculateLiveMetrics = (timetable, teachers = [], classrooms = [], 
   const floatingHalfFailedTeachers = [];
   let floatingDayRequestedCount = 0;
   let floatingHalfRequestedCount = 0;
+  let requestedFreeDayCount = 0;
+  let requestedHalfDayCount = 0;
 
   (teachers || []).forEach(t => {
     const load = teacherLoads[t.id] || 0;
@@ -136,49 +140,93 @@ export const calculateLiveMetrics = (timetable, teachers = [], classrooms = [], 
     const activeDays = days.filter(d => (tBusy[d] || []).length > 0);
     const freeDays = days.filter(d => (tBusy[d] || []).length === 0);
 
-    // 1. Boş gün kontrolü (tüm günlerde dersi olanlar)
-    if (freeDays.length === 0) {
-      teachersWithoutFreeDay.push({
-        id: t.id,
-        name: t.name,
-        load,
-        activeDaysCount: activeDays.length
-      });
-    }
-
-    // Kayan boş gün tercihi kontrolü
+    // 1. BOŞ GÜN İSTEĞİ KONTROLÜ
+    // Yalnızca:
+    // - Kayan boş gün seçenler (floating_1_day veya floating_2_days)
+    // - VEYA bir günün tüm saatlerini kapatarak sabit boş gün isteyenler
+    // boş gün talep etmiş sayılır. İlk iki saatini vb. kapatanlar kendi tercihiyle 5 gün geliyorsa boş gün istemiş sayılmaz.
     const fDay = t.floatingConstraints?.freeDayPreference || 'none';
-    if (fDay === 'floating_1_day') {
-      floatingDayRequestedCount++;
-      if (freeDays.length < 1) {
-        floatingDayFailedTeachers.push({
-          id: t.id,
-          name: t.name,
-          load,
-          activeDaysCount: activeDays.length,
-          reason: `1 gün boş talep etti, ${activeDays.length} gün ders yerleşti`
-        });
+    const fixedFullClosedDays = days.filter(d => (t.unavailable?.[d] || []).length >= numPeriods);
+    const requestedFreeDay = (fDay === 'floating_1_day' || fDay === 'floating_2_days') || fixedFullClosedDays.length > 0;
+
+    if (requestedFreeDay) {
+      requestedFreeDayCount++;
+      let freeDayViolated = false;
+      const reasonParts = [];
+      const requestedLabels = [];
+
+      if (fDay === 'floating_1_day') {
+        floatingDayRequestedCount++;
+        requestedLabels.push('1 Gün Boş (Esnek)');
+        if (freeDays.length < 1) {
+          freeDayViolated = true;
+          const rMsg = `1 gün boş talep etti ancak haftanın ${activeDays.length} gününe ders yerleşti`;
+          reasonParts.push(rMsg);
+          floatingDayFailedTeachers.push({
+            id: t.id,
+            name: t.name,
+            load,
+            activeDaysCount: activeDays.length,
+            reason: rMsg
+          });
+        }
+      } else if (fDay === 'floating_2_days') {
+        floatingDayRequestedCount++;
+        requestedLabels.push('2 Gün Boş (Esnek)');
+        if (freeDays.length < 2) {
+          freeDayViolated = true;
+          const rMsg = `2 gün boş talep etti ancak ${freeDays.length} gün boş kalabildi`;
+          reasonParts.push(rMsg);
+          floatingDayFailedTeachers.push({
+            id: t.id,
+            name: t.name,
+            load,
+            activeDaysCount: activeDays.length,
+            reason: rMsg
+          });
+        }
       }
-    } else if (fDay === 'floating_2_days') {
-      floatingDayRequestedCount++;
-      if (freeDays.length < 2) {
-        floatingDayFailedTeachers.push({
+
+      fixedFullClosedDays.forEach(cd => {
+        requestedLabels.push(`${cd} Kapalı`);
+        if ((tBusy[cd] || []).length > 0) {
+          freeDayViolated = true;
+          reasonParts.push(`${cd} gününü tamamen kapattı ancak o güne ders yerleşti`);
+        }
+      });
+
+      if (freeDayViolated) {
+        teachersWithoutFreeDay.push({
           id: t.id,
           name: t.name,
           load,
           activeDaysCount: activeDays.length,
-          reason: `2 gün boş talep etti, ${freeDays.length} gün boş kaldı`
+          requested: requestedLabels.join(', '),
+          reason: reasonParts.join('; ')
         });
       }
     }
 
-    // 2. Yarım gün boşluk kontrolü
-    let hasHalfDay = false;
+    // 2. YARIM GÜN BOŞLUK İSTEĞİ KONTROLÜ
+    // Yalnızca:
+    // - Kayan yarım gün seçenler (any_afternoon veya any_morning)
+    // - VEYA bir günün sabahını (1..lunchAfter) ya da öğleden sonrasını (lunchAfter+1..numPeriods) tamamen kapatanlar
+    // yarım gün talep etmiş sayılır.
+    const fHalf = t.floatingConstraints?.freeHalfDayPreference || 'none';
+    const fixedMornClosed = days.filter(d => {
+      const un = t.unavailable?.[d] || [];
+      return un.length < numPeriods && Array.from({ length: lunchAfter }, (_, i) => i + 1).every(p => un.includes(p));
+    });
+    const fixedAftClosed = days.filter(d => {
+      const un = t.unavailable?.[d] || [];
+      return un.length < numPeriods && Array.from({ length: numPeriods - lunchAfter }, (_, i) => i + 1 + lunchAfter).every(p => un.includes(p));
+    });
+    const requestedHalfDay = (fHalf === 'any_afternoon' || fHalf === 'any_morning') || fixedMornClosed.length > 0 || fixedAftClosed.length > 0;
+
     let hasFreeAfternoon = false;
     let hasFreeMorning = false;
 
     if (freeDays.length > 0) {
-      hasHalfDay = true;
       hasFreeAfternoon = true;
       hasFreeMorning = true;
     } else {
@@ -187,44 +235,73 @@ export const calculateLiveMetrics = (timetable, teachers = [], classrooms = [], 
         const hasMorn = slots.some(p => p <= lunchAfter);
         const hasAft = slots.some(p => p > lunchAfter);
         if (!hasAft && hasMorn) {
-          hasHalfDay = true;
           hasFreeAfternoon = true;
         }
         if (!hasMorn && hasAft) {
-          hasHalfDay = true;
           hasFreeMorning = true;
         }
       });
     }
 
-    if (!hasHalfDay) {
-      teachersWithoutHalfDay.push({
-        id: t.id,
-        name: t.name,
-        load
-      });
-    }
+    if (requestedHalfDay) {
+      requestedHalfDayCount++;
+      let halfDayViolated = false;
+      const halfReasons = [];
+      const halfLabels = [];
 
-    // Kayan yarım gün tercihi kontrolü
-    const fHalf = t.floatingConstraints?.freeHalfDayPreference || 'none';
-    if (fHalf === 'any_afternoon') {
-      floatingHalfRequestedCount++;
-      if (!hasFreeAfternoon) {
-        floatingHalfFailedTeachers.push({
-          id: t.id,
-          name: t.name,
-          load,
-          reason: 'Öğleden sonra boşluk talep etti, her gün öğleden sonra dersi var'
-        });
+      if (fHalf === 'any_afternoon') {
+        floatingHalfRequestedCount++;
+        halfLabels.push('Öğleden Sonra Boş (Esnek)');
+        if (!hasFreeAfternoon && freeDays.length === 0) {
+          halfDayViolated = true;
+          const hMsg = 'Öğleden sonra boşluk talep etti, her gün öğleden sonra dersi var';
+          halfReasons.push(hMsg);
+          floatingHalfFailedTeachers.push({
+            id: t.id,
+            name: t.name,
+            load,
+            reason: hMsg
+          });
+        }
+      } else if (fHalf === 'any_morning') {
+        floatingHalfRequestedCount++;
+        halfLabels.push('Sabah Boş (Esnek)');
+        if (!hasFreeMorning && freeDays.length === 0) {
+          halfDayViolated = true;
+          const hMsg = 'Sabah boşluk talep etti, her gün ilk saatlerde dersi var';
+          halfReasons.push(hMsg);
+          floatingHalfFailedTeachers.push({
+            id: t.id,
+            name: t.name,
+            load,
+            reason: hMsg
+          });
+        }
       }
-    } else if (fHalf === 'any_morning') {
-      floatingHalfRequestedCount++;
-      if (!hasFreeMorning) {
-        floatingHalfFailedTeachers.push({
+
+      fixedMornClosed.forEach(md => {
+        halfLabels.push(`${md} Sabah Kapalı`);
+        if ((tBusy[md] || []).some(p => p <= lunchAfter)) {
+          halfDayViolated = true;
+          halfReasons.push(`${md} sabahını kapattı ancak sabah ders yerleşti`);
+        }
+      });
+
+      fixedAftClosed.forEach(ad => {
+        halfLabels.push(`${ad} Öğleden Sonra Kapalı`);
+        if ((tBusy[ad] || []).some(p => p > lunchAfter)) {
+          halfDayViolated = true;
+          halfReasons.push(`${ad} öğleden sonrasını kapattı ancak öğleden sonra ders yerleşti`);
+        }
+      });
+
+      if (halfDayViolated) {
+        teachersWithoutHalfDay.push({
           id: t.id,
           name: t.name,
           load,
-          reason: 'Sabah boşluk talep etti, her gün sabah dersi var'
+          requested: halfLabels.join(', '),
+          reason: halfReasons.join('; ')
         });
       }
     }
@@ -330,8 +407,10 @@ export const calculateLiveMetrics = (timetable, teachers = [], classrooms = [], 
     fairnessColor,
     countWithoutFreeDay: teachersWithoutFreeDay.length,
     teachersWithoutFreeDay,
+    requestedFreeDayCount,
     countWithoutHalfDay: teachersWithoutHalfDay.length,
     teachersWithoutHalfDay,
+    requestedHalfDayCount,
     floatingDayRequested: floatingDayRequestedCount,
     floatingDayFailed: floatingDayFailedTeachers.length,
     floatingDayFailedTeachers,
