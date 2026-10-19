@@ -1,6 +1,6 @@
 // frontend/src/components/AvailabilityGrid.jsx
 import { useState, useEffect } from 'react';
-import { RefreshCcw, Calendar, AlertTriangle, Sunrise, Sunset, CheckCircle2, Lock, Unlock } from 'lucide-react';
+import { RefreshCcw, Calendar, AlertTriangle, Sunrise, Sunset, CheckCircle2, Lock, Unlock, CalendarDays } from 'lucide-react';
 
 export default function AvailabilityGrid({ settings, teacher, onChange, totalAssignedHours = 0 }) {
   const { days = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'], periodsPerDay = 8 } = settings || {};
@@ -94,21 +94,18 @@ export default function AvailabilityGrid({ settings, teacher, onChange, totalAss
     const half = Math.floor(periodsPerDay / 2);
 
     if (preset === 'morning_close') {
-      // 1'den half'a kadar tüm günlerde kapat
       days.forEach(d => {
         const current = new Set(newState[d] || []);
         for (let p = 1; p <= half; p++) current.add(p);
         newState[d] = Array.from(current).sort((a, b) => a - b);
       });
     } else if (preset === 'afternoon_close') {
-      // (half+1)'den periodsPerDay'e kadar tüm günlerde kapat
       days.forEach(d => {
         const current = new Set(newState[d] || []);
         for (let p = half + 1; p <= periodsPerDay; p++) current.add(p);
         newState[d] = Array.from(current).sort((a, b) => a - b);
       });
     } else if (preset === 'clear') {
-      // Tümünü aç
       setLocalUnavailable({});
       onChange(teacher.id, {});
       return;
@@ -125,63 +122,66 @@ export default function AvailabilityGrid({ settings, teacher, onChange, totalAss
   const isCapacityExceeded = openSlotsCount < totalAssignedHours;
   const marginHours = openSlotsCount - totalAssignedHours;
 
+  const priorityDay = teacher.priorityFullDay || '';
+  const fillLate = Boolean(teacher.fillLateHours);
+
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden" onMouseLeave={handleMouseUp}>
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col" onMouseLeave={handleMouseUp}>
       
       {/* ÜST BAŞLIK & HAZIR ŞABLONLAR */}
-      <div className="p-3.5 border-b border-slate-100 bg-slate-50/70 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+      <div className="px-3 py-2.5 border-b border-slate-100 bg-slate-50/80 flex flex-wrap justify-between items-center gap-2">
         <div className="flex items-center gap-2">
-          <Calendar className="text-indigo-600" size={16} />
+          <Calendar className="text-indigo-600 shrink-0" size={15} />
           <div>
-            <h3 className="font-extrabold text-slate-800 text-xs">Haftalık Müsaitlik & Kapalı Saatler</h3>
-            <p className="text-[10px] text-slate-500">Kutucukları tıklayarak veya sürükleyerek uygun/kapalı yapın</p>
+            <h3 className="font-extrabold text-slate-800 text-xs leading-tight">Sabit Boş Gün & Saat Kapatma Tablosu</h3>
+            <p className="text-[10px] text-slate-500">Gün adına tıklayarak tam günü, kutucukları sürükleyerek saatleri kapatın/açın</p>
           </div>
         </div>
 
         {/* Hızlı Şablon Butonları */}
-        <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+        <div className="flex flex-wrap items-center gap-1 text-[10px] font-bold">
           <button 
             type="button"
             onClick={() => applyPreset('morning_close')}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-colors cursor-pointer"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-colors cursor-pointer"
             title="Tüm günlerde sabah ilk yarı derslerini kapatır"
           >
-            <Sunrise size={12} className="text-amber-600" /> Sabahları Kapat
+            <Sunrise size={11} className="text-amber-600" /> Sabahları Kapat
           </button>
           
           <button 
             type="button"
             onClick={() => applyPreset('afternoon_close')}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 transition-colors cursor-pointer"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 transition-colors cursor-pointer"
             title="Tüm günlerde öğleden sonraki dersleri kapatır"
           >
-            <Sunset size={12} className="text-purple-600" /> Öğleden Sonra Kapat
+            <Sunset size={11} className="text-purple-600" /> Öğleden Sonra Kapat
           </button>
 
           <button 
             type="button"
             onClick={() => applyPreset('clear')}
-            className="flex items-center gap-1 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+            className="flex items-center gap-1 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2 py-1 rounded-lg transition-colors cursor-pointer"
             title="Tüm kapalı saatleri açar"
           >
-            <RefreshCcw size={11} /> Tümünü Aç
+            <RefreshCcw size={10} /> Tümünü Aç
           </button>
         </div>
       </div>
 
       {/* CANLI KAPASİTE GÖSTERGE ŞERİDİ */}
-      <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-3 text-[11px] font-medium text-slate-600">
-          <span>Toplam Okul: <strong className="text-slate-800">{totalSlots} sa</strong></span>
+      <div className="px-3 py-1.5 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+        <div className="flex items-center gap-2.5 font-medium text-slate-600">
+          <span>Toplam: <strong className="text-slate-800">{totalSlots} sa</strong></span>
           <span className="text-slate-300">•</span>
           <span>Kapalı: <strong className="text-rose-600">{closedSlotsCount} sa</strong></span>
           <span className="text-slate-300">•</span>
-          <span>Açık Vakit: <strong className="text-emerald-700">{openSlotsCount} sa</strong></span>
+          <span>Açık: <strong className="text-emerald-700">{openSlotsCount} sa</strong></span>
         </div>
 
         <div className="flex items-center gap-2">
           {totalAssignedHours > 0 && (
-            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
               isCapacityExceeded 
                 ? 'bg-rose-100 text-rose-800 border border-rose-300 animate-pulse' 
                 : marginHours <= 2 
@@ -190,13 +190,13 @@ export default function AvailabilityGrid({ settings, teacher, onChange, totalAss
             }`}>
               {isCapacityExceeded ? (
                 <>
-                  <AlertTriangle size={11} className="text-rose-600" />
-                  Kapasite Yetersiz ({marginHours} sa açık)!
+                  <AlertTriangle size={10} className="text-rose-600" />
+                  Kapasite Yetersiz ({marginHours} sa)!
                 </>
               ) : (
                 <>
-                  <CheckCircle2 size={11} className="text-emerald-600" />
-                  Yük: {totalAssignedHours} sa / Pay: +{marginHours} sa
+                  <CheckCircle2 size={10} className="text-emerald-600" />
+                  Ders Yükü: {totalAssignedHours} sa (Pay: +{marginHours} sa)
                 </>
               )}
             </span>
@@ -206,40 +206,61 @@ export default function AvailabilityGrid({ settings, teacher, onChange, totalAss
       
       {/* 🚨 KRİTİK KAPASİTE UYARISI */}
       {isCapacityExceeded && (
-        <div className="bg-rose-50 border-b border-rose-200 p-3 flex gap-2.5 text-rose-800 text-xs">
-          <AlertTriangle size={18} className="shrink-0 text-rose-600 mt-0.5" />
-          <div className="text-[11px] leading-relaxed font-semibold">
-            <strong>Kritik Kapasite Uyarısı:</strong> Öğretmene toplam <strong>{totalAssignedHours} saat</strong> ders atanmıştır, ancak takvimde yalnızca <strong>{openSlotsCount} saat</strong> açık vakit bırakılmıştır. Dağıtım motorunun programı oluşturabilmesi için lütfen kapalı saatlerden en az {Math.abs(marginHours)} saati açınız.
+        <div className="bg-rose-50 border-b border-rose-200 px-3 py-2 flex gap-2 text-rose-800 text-[11px] items-center">
+          <AlertTriangle size={15} className="shrink-0 text-rose-600" />
+          <div className="leading-snug font-semibold">
+            <strong>Kapasite Uyarısı:</strong> Öğretmene <strong>{totalAssignedHours} saat</strong> ders atanmış ancak <strong>{openSlotsCount} saat</strong> açık bırakılmış. En az {Math.abs(marginHours)} saat daha açmalısınız.
           </div>
         </div>
       )}
 
       {/* MATRİS TABLOSU */}
-      <div className="p-3 overflow-x-auto">
+      <div className="p-2 overflow-x-auto">
         <table className="w-full border-collapse table-fixed">
           <thead>
             <tr>
-              <th className="p-1.5 border border-slate-200 bg-slate-100/70 w-16 text-[10px] text-slate-500 font-extrabold text-center">
-                Saat / Gün
+              <th className="p-1 border border-slate-200 bg-slate-100/70 w-14 text-[10px] text-slate-500 font-extrabold text-center">
+                Saat \ Gün
               </th>
               {days.map(day => {
                 const dayClosedCount = (localUnavailable[day] || []).length;
                 const isFullDayClosed = dayClosedCount === periodsPerDay;
+                const isPriorityDay = priorityDay === day;
 
                 return (
-                  <th key={day} className="p-1.5 border border-slate-200 bg-slate-100/70 text-[11px] font-bold text-slate-700 text-center">
+                  <th
+                    key={day}
+                    className={`p-1 border border-slate-200 text-[11px] font-bold text-center transition-colors ${
+                      isFullDayClosed
+                        ? 'bg-rose-50/90 text-rose-900'
+                        : isPriorityDay
+                          ? 'bg-indigo-50/90 text-indigo-900'
+                          : 'bg-slate-100/70 text-slate-700'
+                    }`}
+                  >
                     <button 
                       type="button"
                       onClick={() => toggleWholeDay(day)} 
-                      className="hover:text-indigo-600 hover:underline cursor-pointer flex flex-col items-center justify-center w-full"
-                      title={`${day} gününün tüm saatlerini aç / kapat`}
+                      className="hover:text-indigo-600 cursor-pointer flex flex-col items-center justify-center w-full gap-0.5"
+                      title={`${day} gününün tüm saatlerini kapat (Boş Gün yap) veya aç`}
                     >
-                      <span>{day}</span>
-                      <span className={`text-[9px] font-black px-1 rounded ${
-                        isFullDayClosed ? 'bg-rose-200 text-rose-800' : dayClosedCount > 0 ? 'bg-amber-100 text-amber-800' : 'text-slate-400 font-normal'
-                      }`}>
-                        {isFullDayClosed ? 'Tam Kapalı' : dayClosedCount > 0 ? `${dayClosedCount}k` : 'Açık'}
-                      </span>
+                      <span className="leading-tight">{day}</span>
+                      <div className="flex items-center justify-center gap-1 flex-wrap">
+                        <span className={`text-[9px] font-black px-1.5 py-0.2 rounded ${
+                          isFullDayClosed
+                            ? 'bg-rose-500 text-white'
+                            : dayClosedCount > 0
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold'
+                        }`}>
+                          {isFullDayClosed ? 'BOŞ GÜN' : dayClosedCount > 0 ? `${dayClosedCount} Sa Kapalı` : 'Tam Açık'}
+                        </span>
+                        {isPriorityDay && !isFullDayClosed && (
+                          <span className="text-[8px] font-black px-1 rounded bg-indigo-600 text-white flex items-center gap-0.5" title="Öncelikli tam doldurulacak gün">
+                            <CalendarDays size={8} /> Dolu
+                          </span>
+                        )}
+                      </div>
                     </button>
                   </th>
                 );
@@ -247,59 +268,78 @@ export default function AvailabilityGrid({ settings, teacher, onChange, totalAss
             </tr>
           </thead>
           <tbody>
-            {Array.from({ length: periodsPerDay }, (_, i) => i + 1).map(period => (
-              <tr key={period}>
-                <td className="p-1 border border-slate-200 text-center bg-slate-50">
-                  <button
-                    type="button"
-                    onClick={() => togglePeriodAcrossDays(period)}
-                    className="w-full py-1 text-[10px] font-black text-slate-600 hover:text-indigo-600 hover:bg-slate-200/60 rounded cursor-pointer transition-colors"
-                    title={`${period}. dersi tüm haftada aç / kapat`}
-                  >
-                    {period}. Ders
-                  </button>
-                </td>
-                {days.map(day => {
-                  const closed = (localUnavailable[day] || []).includes(period);
-                  return (
-                    <td key={`${day}-${period}`} className="p-1 border border-slate-200">
-                      <button
-                        type="button"
-                        onMouseDown={() => handleMouseDown(day, period)}
-                        onMouseEnter={() => handleMouseEnter(day, period)}
-                        className={`w-full h-8 flex items-center justify-center gap-1 rounded-lg transition-all cursor-pointer select-none text-[10px] font-black tracking-wide border ${
-                          closed 
-                            ? 'bg-rose-100 hover:bg-rose-200 text-rose-800 border-rose-300 shadow-2xs' 
-                            : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200 shadow-2xs'
-                        }`}
-                        title={closed ? 'Kapalı (Tıklayarak aç)' : 'Uygun (Tıklayarak kapat)'}
-                      >
-                        {closed ? (
-                          <>
-                            <Lock size={10} className="text-rose-600" />
-                            <span>KAPALI</span>
-                          </>
-                        ) : (
-                          <>
-                            <Unlock size={10} className="text-emerald-600" />
-                            <span>UYGUN</span>
-                          </>
-                        )}
-                      </button>
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+            {Array.from({ length: periodsPerDay }, (_, i) => i + 1).map(period => {
+              const isLatePeriod = period >= periodsPerDay - 1;
+              return (
+                <tr key={period}>
+                  <td className="p-0.5 border border-slate-200 text-center bg-slate-50">
+                    <button
+                      type="button"
+                      onClick={() => togglePeriodAcrossDays(period)}
+                      className="w-full py-1 text-[10px] font-black text-slate-600 hover:text-indigo-600 hover:bg-slate-200/60 rounded cursor-pointer transition-colors"
+                      title={`${period}. dersi tüm haftada aç / kapat`}
+                    >
+                      {period}. Saat
+                    </button>
+                  </td>
+                  {days.map(day => {
+                    const closed = (localUnavailable[day] || []).includes(period);
+                    const isPriorityDay = priorityDay === day;
+                    const isPriorityLateHighlight = isPriorityDay && fillLate && isLatePeriod && !closed;
+
+                    return (
+                      <td key={`${day}-${period}`} className="p-0.5 border border-slate-200">
+                        <button
+                          type="button"
+                          onMouseDown={() => handleMouseDown(day, period)}
+                          onMouseEnter={() => handleMouseEnter(day, period)}
+                          className={`w-full h-7 flex items-center justify-center gap-1 rounded-md transition-all cursor-pointer select-none text-[10px] font-black tracking-wide border ${
+                            closed 
+                              ? 'bg-rose-100 hover:bg-rose-200 text-rose-800 border-rose-300' 
+                              : isPriorityLateHighlight
+                                ? 'bg-indigo-100 hover:bg-indigo-200 text-indigo-900 border-indigo-400 ring-1 ring-indigo-300'
+                                : isPriorityDay
+                                  ? 'bg-indigo-50/70 hover:bg-indigo-100/80 text-indigo-900 border-indigo-200'
+                                  : 'bg-emerald-50/80 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+                          }`}
+                          title={
+                            closed
+                              ? 'Kapalı (Tıklayarak aç)'
+                              : isPriorityLateHighlight
+                                ? `${day} son saat kesin dolu öncelikli (Tıklayarak kapat)`
+                                : isPriorityDay
+                                  ? `${day} tam doldurma öncelikli (Tıklayarak kapat)`
+                                  : 'Uygun (Tıklayarak kapat)'
+                          }
+                        >
+                          {closed ? (
+                            <>
+                              <Lock size={9} className="text-rose-600 shrink-0" />
+                              <span>KAPALI</span>
+                            </>
+                          ) : (
+                            <>
+                              <Unlock size={9} className={isPriorityDay ? "text-indigo-600 shrink-0" : "text-emerald-600 shrink-0"} />
+                              <span>{isPriorityLateHighlight ? 'SON SA. DOLU' : isPriorityDay ? 'ÖNCELİKLİ' : 'UYGUN'}</span>
+                            </>
+                          )}
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
-      <div className="p-2.5 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400 font-medium">
-        <span>💡 İpucu: Gün başlıklarına tıklayarak tüm günü, ders numaralarına tıklayarak o saati tüm haftada değiştirebilirsiniz.</span>
-        <span>Sürükleyerek toplu boyama yapabilirsiniz</span>
+      <div className="px-3 py-1.5 bg-slate-50/60 border-t border-slate-100 flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-400 font-medium">
+        <span>💡 Gün başlığına tıklayarak sabit boş gün verebilir, saat numarasına tıklayarak o saati tüm haftada kapatabilirsiniz.</span>
+        <span>Fareyle basılı tutup sürükleyebilirsiniz</span>
       </div>
 
     </div>
   );
 }
+

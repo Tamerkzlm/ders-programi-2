@@ -61,6 +61,814 @@ export const formatExamDay = (dateStr) => {
 };
 
 /**
+ * 🛡️ Türkçe karakter, kesme işareti ve boşluk duyarsız kanonik metin normalizasyonu
+ */
+export const normalizeTr = (str = '') => {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .trim()
+    .replace(/['’`´]/g, '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/i̇/g, 'i')
+    .replace(/\s+/g, ' ');
+};
+
+/**
+ * 🛡️ MEB Ders Adı / Kodu -> Öğretmen Branş Kodu (teacher.branch) Eşleştirme Haritası
+ */
+export const SUBJECT_BRANCH_MAP = {
+  'türk dili ve edebiyatı': ['TDEB', 'EDEB', 'EDEBİYAT', 'TÜRKÇE'],
+  'seçmeli edebiyat': ['TDEB', 'EDEB'],
+  'seçmeli türk dili ve edebiyatı': ['TDEB', 'EDEB'],
+  'edebiy': ['TDEB', 'EDEB'],
+  'tdeb': ['TDEB', 'EDEB'],
+  'stedb': ['TDEB', 'EDEB'],
+  'osmanlı türkçesi': ['TDEB', 'IHL', 'TAR'],
+  'o.tür2': ['TDEB', 'IHL'],
+  'o.tur2': ['TDEB', 'IHL'],
+  'o.tür1': ['TDEB', 'IHL'],
+
+  'matematik': ['MAT', 'MATEMATİK', 'GEOM'],
+  'temel matematik': ['MAT', 'MATEMATİK'],
+  'mat': ['MAT'],
+  'mat10': ['MAT'],
+  'mat4': ['MAT'],
+  't.mat2': ['MAT'],
+
+  'fizik': ['FİZ', 'FIZ', 'FİZİK'],
+  'fizk': ['FİZ', 'FIZ'],
+
+  'kimya': ['KIM', 'KİM', 'KİMYA', 'KMYA'],
+  'kim9': ['KIM', 'KİM'],
+  'kmya': ['KIM', 'KİM'],
+
+  'biyoloji': ['BIO', 'BİY', 'BİYO', 'BİYOLOJİ'],
+  'biy': ['BIO', 'BİY'],
+  'biyo': ['BIO', 'BİY'],
+  'sağlık bilgisi': ['BIO', 'BİY', 'SAĞLIK'],
+  'sağlık bilgisi ve trafik kültürü': ['BIO', 'BİY', 'SAĞLIK'],
+  '9sag': ['BIO', 'BİY'],
+
+  'tarih': ['TAR', 'TARİH'],
+  't.c. inkılap tarihi ve atatürkçülük': ['TAR', 'TARİH'],
+  'inkıla': ['TAR', 'TARİH'],
+  'inkila': ['TAR', 'TARİH'],
+  'çağdaş türk ve dünya tarihi': ['TAR', 'TARİH'],
+  'ctdt2': ['TAR', 'TARİH'],
+
+  'coğrafya': ['COG', 'COĞ', 'COĞRAFYA'],
+  'cogh2': ['COG', 'COĞ'],
+  'coğrfy': ['COG', 'COĞ'],
+  'cogrfy': ['COG', 'COĞ'],
+
+  'felsefe': ['FEL', 'FELSEFE', 'PSK'],
+  'felh1': ['FEL', 'FELSEFE'],
+  '11fel': ['FEL', 'FELSEFE'],
+  'psikoloji': ['FEL', 'PSK', 'PSİKOLOJİ'],
+  'psko': ['FEL', 'PSK'],
+
+  'ingilizce': ['ING', 'İNG', 'İNGİLİZCE'],
+  '9ing': ['ING', 'İNG'],
+  'ing1': ['ING', 'İNG'],
+
+  'arapça': ['ARP', 'ARAPÇA', 'IHL'],
+  'mesleki arapça': ['IHL', 'ARP', 'ARAPÇA'],
+  'arp9': ['ARP', 'IHL'],
+  'arp10': ['ARP', 'IHL'],
+  'marp11': ['IHL', 'ARP'],
+  'arapç3': ['ARP', 'IHL'],
+
+  'kuran-ı kerim': ['IHL', 'DİKAB', 'KURAN'],
+  'kuranı kerim': ['IHL', 'DİKAB', 'KURAN'],
+  'kuran': ['IHL', 'DİKAB'],
+  'kkrim': ['IHL', 'DİKAB'],
+  'kker': ['IHL', 'DİKAB'],
+  'kker11': ['IHL', 'DİKAB'],
+  'temel dini bilgiler': ['IHL', 'DİKAB'],
+  'tdb': ['IHL', 'DİKAB'],
+  'siyer': ['IHL', 'DİKAB'],
+  'hadis': ['IHL', 'DİKAB'],
+  'fıkıh': ['IHL', 'DİKAB'],
+  'fikih': ['IHL', 'DİKAB'],
+  'tefsir': ['IHL', 'DİKAB'],
+  'akaid': ['IHL', 'DİKAB'],
+  'hitabet': ['IHL', 'DİKAB'],
+  'hitabet ve mesleki uygulama': ['IHL', 'DİKAB'],
+  'hitab': ['IHL', 'DİKAB'],
+  'kelam': ['IHL', 'DİKAB'],
+  'islam kültür ve medeniyeti': ['IHL', 'DİKAB', 'TAR'],
+  'ikmed': ['IHL', 'DİKAB'],
+  'dinler tarihi': ['IHL', 'DİKAB'],
+  'dint': ['IHL', 'DİKAB'],
+
+  'görsel sanatlar': ['GSBD', 'GÖRSEL', 'MÜZİK', 'BEDEN'],
+  'beden eğitimi': ['GSBD', 'BEDEN'],
+  'müzik': ['GSBD', 'MÜZİK'],
+  'gs1': ['GSBD'],
+  'gsbd': ['GSBD']
+};
+
+/**
+ * 🛡️ Bir öğretmenin belirli bir günde (Pazartesi..Cuma) okulda olup olmadığını denetler.
+ * - Öğretmen kısıt tablosunda o günün tamamını (veya >=6 saati) kapattıysa okulda yoktur.
+ * - Aktif ders programı (timetable) doluysa ve öğretmene okul genelinde ders atanmışsa:
+ *   o gün en az 1 dersi varsa okulda kabul edilir.
+ */
+export const isTeacherPresentOnDay = (teacher, dayName, timetable = {}, periodsPerDay = 8) => {
+  if (!teacher || !dayName) return false;
+
+  const maxPeriods = Number(periodsPerDay) || 8;
+  const closedHours = Array.isArray(teacher.unavailable?.[dayName]) ? teacher.unavailable[dayName] : [];
+
+  // 1. Öğretmen kısıt tablosunda o günün tamamını (veya >=6 saati) kapattıysa okulda yoktur
+  if (closedHours.length >= maxPeriods || closedHours.length >= 6) {
+    return false;
+  }
+
+  // 2. Aktif timetable (ders programı) kontrolü
+  const hasTimetableData = timetable && typeof timetable === 'object' && Object.keys(timetable).length > 0;
+  if (hasTimetableData) {
+    let teacherTotalAssignedInSchool = 0;
+    let teacherAssignedOnTargetDay = 0;
+
+    for (const classId of Object.keys(timetable)) {
+      const classDays = timetable[classId];
+      if (!classDays || typeof classDays !== 'object') continue;
+
+      for (const [dName, slots] of Object.entries(classDays)) {
+        if (!Array.isArray(slots)) continue;
+        for (const s of slots) {
+          if (s && s.teacherId === teacher.id) {
+            teacherTotalAssignedInSchool++;
+            if (dName === dayName) {
+              teacherAssignedOnTargetDay++;
+            }
+          }
+        }
+      }
+    }
+
+    if (teacherTotalAssignedInSchool > 0) {
+      return teacherAssignedOnTargetDay > 0;
+    }
+  }
+
+  return true;
+};
+
+/**
+ * 🛡️ Bir sınav dersi için ilgili zümre öğretmenlerini bulur (SUBJECT_BRANCH_MAP + classrooms hibrit tespiti).
+ */
+export const getSubjectBranchTeachers = (
+  subjectName,
+  subjectCode = '',
+  teachers = [],
+  classrooms = []
+) => {
+  if (!Array.isArray(teachers) || teachers.length === 0) return [];
+
+  const normName = normalizeTr(subjectName);
+  const normCode = normalizeTr(subjectCode);
+
+  const targetBranches = new Set();
+  if (normName && SUBJECT_BRANCH_MAP[normName]) {
+    SUBJECT_BRANCH_MAP[normName].forEach(b => targetBranches.add(normalizeTr(b)));
+  }
+  if (normCode && SUBJECT_BRANCH_MAP[normCode]) {
+    SUBJECT_BRANCH_MAP[normCode].forEach(b => targetBranches.add(normalizeTr(b)));
+  }
+
+  if (targetBranches.size === 0 && normName) {
+    Object.entries(SUBJECT_BRANCH_MAP).forEach(([key, branches]) => {
+      if (key.length >= 4 && (normName.includes(key) || key.includes(normName))) {
+        branches.forEach(b => targetBranches.add(normalizeTr(b)));
+      }
+    });
+  }
+
+  const assignedTeacherIds = new Set();
+  if (Array.isArray(classrooms)) {
+    classrooms.forEach(cls => {
+      (cls?.courses || []).forEach(co => {
+        if (!co?.teacherId) return;
+        const coSubNorm = normalizeTr(co.subject);
+        const coCodeNorm = normalizeTr(co.code);
+        if (
+          (normName && (coSubNorm === normName || coCodeNorm === normName)) ||
+          (normCode && (coSubNorm === normCode || coCodeNorm === normCode)) ||
+          (normName && coSubNorm && SUBJECT_BRANCH_MAP[coSubNorm] && SUBJECT_BRANCH_MAP[normName] &&
+            SUBJECT_BRANCH_MAP[coSubNorm][0] === SUBJECT_BRANCH_MAP[normName][0])
+        ) {
+          assignedTeacherIds.add(co.teacherId);
+        }
+      });
+    });
+  }
+
+  return teachers.filter(t => {
+    if (!t) return false;
+    if (assignedTeacherIds.has(t.id)) return true;
+    const tBranchNorm = normalizeTr(t.branch);
+    if (!tBranchNorm) return false;
+    if (targetBranches.has(tBranchNorm)) return true;
+    if (normName && (normName.includes(tBranchNorm) || tBranchNorm.includes(normName))) return true;
+    return false;
+  });
+};
+
+/**
+ * 🛡️ Belirli bir günde ilgili dersin zümresinden EN AZ BİR öğretmenin okulda olup olmadığını kontrol eder.
+ */
+export const checkBranchAvailabilityOnDay = ({
+  subjectName,
+  subjectCode = '',
+  dateOrDayName,
+  teachers = [],
+  classrooms = [],
+  timetable = {},
+  periodsPerDay = 8
+}) => {
+  let dayName = dateOrDayName;
+  if (typeof dateOrDayName === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateOrDayName)) {
+    const formatted = formatExamDay(dateOrDayName);
+    dayName = formatted?.dayName || '';
+  }
+
+  const branchTeachers = getSubjectBranchTeachers(subjectName, subjectCode, teachers, classrooms);
+
+  if (branchTeachers.length === 0) {
+    return {
+      isAvailable: true,
+      hasTeachers: false,
+      totalBranchTeachers: 0,
+      availableTeachers: [],
+      unavailableTeachers: [],
+      dayName
+    };
+  }
+
+  const availableTeachers = [];
+  const unavailableTeachers = [];
+
+  branchTeachers.forEach(t => {
+    if (isTeacherPresentOnDay(t, dayName, timetable, periodsPerDay)) {
+      availableTeachers.push(t);
+    } else {
+      unavailableTeachers.push(t);
+    }
+  });
+
+  return {
+    isAvailable: availableTeachers.length > 0,
+    hasTeachers: true,
+    totalBranchTeachers: branchTeachers.length,
+    availableTeachers,
+    unavailableTeachers,
+    dayName
+  };
+};
+
+/**
+ * 🚀 Performans için Gün x Ders Bazında Zümre Uygunluk Önbelleklemesi (Precomputed Availability Cache)
+ */
+export const buildBranchAvailabilityCache = ({
+  courses = [],
+  workingDays = [],
+  teachers = [],
+  classrooms = [],
+  timetable = {},
+  periodsPerDay = 8
+}) => {
+  const cache = new Map();
+
+  courses.forEach(course => {
+    const normName = normalizeTr(course.name);
+    if (!normName) return;
+    workingDays.forEach(dayObj => {
+      const dateStr = typeof dayObj === 'string' ? dayObj : dayObj.date;
+      const dayName = typeof dayObj === 'string' ? (formatExamDay(dayObj)?.dayName || '') : dayObj.dayName;
+      const key = `${normName}__${dateStr}`;
+      if (!cache.has(key)) {
+        cache.set(
+          key,
+          checkBranchAvailabilityOnDay({
+            subjectName: course.name,
+            subjectCode: course.code || '',
+            dateOrDayName: dayName || dateStr,
+            teachers,
+            classrooms,
+            timetable,
+            periodsPerDay
+          })
+        );
+      }
+    });
+  });
+
+  return cache;
+};
+
+/**
+ * Yerleşim (placements) listesinden grade -> date -> slot -> subjectObj yapısını üretir
+ */
+export const buildScheduleFromPlacements = (placements = [], grades = [], workingDays = [], subjectsByGrade = {}) => {
+  const schedule = {};
+  grades.forEach(grade => {
+    schedule[grade] = {};
+    workingDays.forEach(day => {
+      const dateStr = typeof day === 'string' ? day : day.date;
+      schedule[grade][dateStr] = {};
+    });
+  });
+
+  placements.forEach(p => {
+    if (!p || !p.date || p.slot === undefined || p.slot === null) return;
+    const levels = p.levels || p.levelIds || [];
+    levels.forEach(grade => {
+      if (!schedule[grade]) schedule[grade] = {};
+      if (!schedule[grade][p.date]) schedule[grade][p.date] = {};
+      const gradeSub = (subjectsByGrade[grade] || []).find(
+        s => normalizeTr(s.name) === normalizeTr(p.name)
+      );
+      schedule[grade][p.date][p.slot] = {
+        id: gradeSub?.id || p.courseId || p.id,
+        name: p.name,
+        code: gradeSub?.code || p.code || '',
+        isMajor: !!(p.isMajor ?? gradeSub?.isMajor),
+        isMebExam: !!(p.isMebExam ?? gradeSub?.isMebExam),
+        mebDate: p.mebDate || gradeSub?.mebDate || null,
+        mebSlot: p.mebSlot || gradeSub?.mebSlot || null,
+        slot: Number(p.slot),
+        placementId: p.id
+      };
+    });
+  });
+
+  return schedule;
+};
+
+/**
+ * Mevcut grade -> date -> slot -> subjectObj yapısından birleştirilmiş placements listesini üretir
+ */
+export const buildPlacementsFromSchedule = (schedule = {}, grades = [], examSlots = []) => {
+  if (!schedule || typeof schedule !== 'object') return [];
+  const grouped = new Map(); // key: `${date}__${slot}__${normName}__${isMebFlag}`
+
+  const activeGrades = grades.length > 0 ? grades : Object.keys(schedule);
+  activeGrades.forEach(grade => {
+    const gradeDates = schedule[grade] || {};
+    Object.entries(gradeDates).forEach(([dateStr, slotsMap]) => {
+      Object.entries(slotsMap || {}).forEach(([slotKey, sub]) => {
+        if (!sub || !sub.name) return;
+        const slotNum = Number(slotKey);
+        if (examSlots.length > 0 && !examSlots.includes(slotNum) && !sub.isMebExam) return;
+        const normName = sub.name.trim().toLocaleUpperCase('tr-TR');
+        const isMebFlag = sub.isMebExam ? 'MEB' : 'SCH';
+        const mapKey = `${dateStr}__${slotNum}__${normName}__${isMebFlag}`;
+        if (!grouped.has(mapKey)) {
+          grouped.set(mapKey, {
+            id: sub.placementId || `pl_${dateStr}_${slotNum}_${normName.replace(/[^A-Z0-9]/g, '')}_${isMebFlag}`,
+            courseId: sub.id,
+            name: normName,
+            code: sub.code || '',
+            isMajor: !!sub.isMajor,
+            isMebExam: !!sub.isMebExam,
+            mebDate: sub.mebDate || (sub.isMebExam ? dateStr : null),
+            mebSlot: sub.mebSlot || (sub.isMebExam ? slotNum : null),
+            levels: [grade],
+            date: dateStr,
+            slot: slotNum
+          });
+        } else {
+          const item = grouped.get(mapKey);
+          if (!item.levels.includes(grade)) {
+            item.levels.push(grade);
+          }
+          if (sub.isMajor) item.isMajor = true;
+          if (sub.isMebExam) item.isMebExam = true;
+        }
+      });
+    });
+  });
+
+  return Array.from(grouped.values());
+};
+
+/**
+ * Bir dersin kaç farklı ana sınıf kademesinde (9, 10, 11, 12) okutulduğunu hesaplar.
+ * Örn: ["11-SAY", "11-EA"] -> sadece "11" kademesi (1 ana kademe).
+ * Örn: ["9", "10", "11-SAY", "12"] -> 4 farklı ana kademe (Okul geneli ortak ders).
+ */
+const getDistinctBaseGradesCount = (course) => {
+  if (!Array.isArray(course?.levels) || course.levels.length === 0) return 0;
+  const baseGrades = new Set(course.levels.map(l => String(l).split('-')[0].trim()));
+  return baseGrades.size;
+};
+
+/**
+ * Dersin öncelik katmanını belirler:
+ * 1: Ana Dersler (Matematik, Edebiyat, Fizik, Kimya, Biyoloji)
+ * 2: Kademeler Arası (Okul Geneli) Ortak Dersler (!isMajor && distinctBaseGrades >= 2)
+ * 3: Tek Kademe / Alan Lokal Dersleri (!isMajor && distinctBaseGrades === 1; örn: Hadis, Siyer, Fıkıh, Psikoloji, Seçmeli Edebiyat, Kelam vb.)
+ */
+const getCourseTier = (course) => {
+  if (course.isMajor) return 1;
+  if (getDistinctBaseGradesCount(course) >= 2) return 2;
+  return 3;
+};
+
+/**
+ * Bir dersin zümre öğretmenlerinin kaç sınav gününde okulda (açık) olduğunu sayar.
+ * Daha az açık günü olan (daha kısıtlı) dersler kendi katmanı içinde öncelik alır.
+ */
+const countOpenDaysForCourse = (course, validDates, availabilityCache) => {
+  if (!availabilityCache || course.isMebExam) return validDates.length;
+  const normName = normalizeTr(course.name);
+  let openCount = 0;
+  for (const date of validDates) {
+    const info = availabilityCache.get(`${normName}__${date}`);
+    if (!info || !info.hasTeachers || info.isAvailable) {
+      openCount++;
+    }
+  }
+  return openCount;
+};
+
+/**
+ * Katman hiyerarşisini (Tier 1 -> Tier 2 -> Tier 3) ASLA bozmadan çoklu geçiş (multi-pass)
+ * aday ders dizilimleri üretir. Böylece lokal dersler hiçbir zaman ortak derslerin önüne geçemez.
+ */
+const buildTieredCourseOrders = (unifiedCourses, validDates, availabilityCache, passCount = 8) => {
+  const openDayMap = new Map();
+  unifiedCourses.forEach(c => {
+    openDayMap.set(c.name, countOpenDaysForCourse(c, validDates, availabilityCache));
+  });
+
+  const tier1 = unifiedCourses.filter(c => getCourseTier(c) === 1);
+  const tier2 = unifiedCourses.filter(c => getCourseTier(c) === 2);
+  const tier3 = unifiedCourses.filter(c => getCourseTier(c) === 3);
+
+  const baseSort = (a, b) => {
+    // 1. Önce kapsadığı farklı ana kademe sayısı (9, 10, 11, 12) yüksek olanlar
+    const baseDiff = getDistinctBaseGradesCount(b) - getDistinctBaseGradesCount(a);
+    if (baseDiff !== 0) return baseDiff;
+    // 2. Sonra toplam grup/alan sayısı (levels.length) yüksek olanlar
+    if (b.levels.length !== a.levels.length) {
+      return b.levels.length - a.levels.length;
+    }
+    // 3. Zümre açık gün sayısı daha az (daha kısıtlı) olanlar
+    const openA = openDayMap.get(a.name) ?? validDates.length;
+    const openB = openDayMap.get(b.name) ?? validDates.length;
+    if (openA !== openB) {
+      return openA - openB;
+    }
+    return a.name.localeCompare(b.name, 'tr-TR');
+  };
+
+  const t1Sorted = [...tier1].sort(baseSort);
+  const t2Sorted = [...tier2].sort(baseSort);
+  const t3Sorted = [...tier3].sort(baseSort);
+
+  const orders = [
+    // Geçiş 1: Tam deterministik ideal sıra (Kademe sayısı azalan + Zümre kısıtı artan)
+    [...t1Sorted, ...t2Sorted, ...t3Sorted],
+    // Geçiş 2: Zümre kısıtı en dar olanlar önce (kendi katmanı içinde)
+    [
+      ...[...tier1].sort((a, b) => (openDayMap.get(a.name) - openDayMap.get(b.name)) || (b.levels.length - a.levels.length)),
+      ...[...tier2].sort((a, b) => (openDayMap.get(a.name) - openDayMap.get(b.name)) || (b.levels.length - a.levels.length)),
+      ...[...tier3].sort((a, b) => (openDayMap.get(a.name) - openDayMap.get(b.name)) || (b.levels.length - a.levels.length))
+    ]
+  ];
+
+  // Deterministik pseudo-random karıştırıcı (Her katmanı SADECE kendi içinde karıştırır, seviye alt-gruplarını korur)
+  let seed = 42;
+  const nextRand = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+
+  const shuffleWithinLevelCount = (arr) => {
+    const byLen = new Map();
+    arr.forEach(item => {
+      const len = item.levels.length;
+      if (!byLen.has(len)) byLen.set(len, []);
+      byLen.get(len).push(item);
+    });
+    const sortedLens = Array.from(byLen.keys()).sort((a, b) => b - a);
+    const result = [];
+    sortedLens.forEach(len => {
+      const group = [...byLen.get(len)];
+      for (let i = group.length - 1; i > 0; i--) {
+        const j = Math.floor(nextRand() * (i + 1));
+        [group[i], group[j]] = [group[j], group[i]];
+      }
+      result.push(...group);
+    });
+    return result;
+  };
+
+  for (let p = 2; p < passCount; p++) {
+    orders.push([
+      ...shuffleWithinLevelCount(t1Sorted),
+      ...shuffleWithinLevelCount(t2Sorted),
+      ...shuffleWithinLevelCount(t3Sorted)
+    ]);
+  }
+
+  return orders;
+};
+
+/**
+ * Bir dersin aday (date, slot) hücresine yerleştirilmesinin denge maliyetini (cost) hesaplar.
+ * En düşük maliyetli hücre seçilir (Best-Fit Balanced Daily Cap):
+ * - Önce tüm günlere 1'er sınav yayılır (0 sınav olan günler en ucuzdur),
+ * - Sonra günlere 2. sınavlar dengeli dağıtılır (ilk 2 seans tercih edilir),
+ * - Mecbur kalınırsa 3. sınav (veya 3. seans) yalnızca en sona kalan lokal dersler için kullanılır.
+ */
+const evaluatePlacementCost = ({
+  course,
+  date,
+  dateIndex,
+  totalDays,
+  slot,
+  slotIndex,
+  placements
+}) => {
+  const dayPlacements = placements.filter(p => p.date === date);
+
+  // İlgili dersin kademelerinin (levels) bu gündeki mevcut sınav sayıları
+  let maxDailyForCourseLevels = 0;
+  let sumDailyForCourseLevels = 0;
+  let hasMajorOnDayForLevels = false;
+
+  for (const level of course.levels) {
+    let levelCount = 0;
+    for (const p of dayPlacements) {
+      if (p.levels.includes(level)) {
+        levelCount++;
+        if (p.isMajor) hasMajorOnDayForLevels = true;
+      }
+    }
+    if (levelCount > maxDailyForCourseLevels) {
+      maxDailyForCourseLevels = levelCount;
+    }
+    sumDailyForCourseLevels += levelCount;
+  }
+
+  // Okul genelinde o günkü toplam sınav yükü (kart sayısı ve kademe-sınav toplamı)
+  const schoolDailyCardsCount = dayPlacements.length;
+  const schoolDailyLevelLoad = dayPlacements.reduce((acc, p) => acc + (p.levels?.length || 1), 0);
+
+  let cost = 0;
+
+  // 1. KADEMELİ GÜNLÜK LİMİT (PROGRESSIVE DAILY CAP) MALİYETİ:
+  // Kademe 1: O gün ilgili sınıfların hiç sınavı yoksa (0 -> 1. sınav) -> Maliyet 0
+  // Kademe 2: O gün ilgili sınıfların 1 sınavı varsa (1 -> 2. sınav) -> Orta maliyet (+450)
+  // Kademe 3: O gün ilgili sınıfların zaten 2 (veya daha fazla) sınavı varsa (2 -> 3. sınav) -> Çok ağır ceza (+12.000)
+  if (maxDailyForCourseLevels === 0) {
+    cost += 0;
+  } else if (maxDailyForCourseLevels === 1) {
+    cost += 450 + (sumDailyForCourseLevels * 95);
+  } else {
+    // 3. sınav (veya üstü): 2 sınavlık yer varken asla tercih edilmez!
+    cost += 12000 + (maxDailyForCourseLevels * 4000) + (sumDailyForCourseLevels * 300);
+  }
+
+  // 2. SEANS (SLOT INDEX) TERCİHİ VE 3. SEANS KORUMASI:
+  const distinctBaseGrades = getDistinctBaseGradesCount(course);
+  const isMultiGradeShared = distinctBaseGrades >= 2;
+  const isSingleGradeMultiTrack = distinctBaseGrades === 1 && (course.levels?.length || 0) >= 2;
+
+  if (slotIndex === 0) {
+    // 1. seans: Ana dersler için ideal, diğer dersler için doğal tercih
+    cost += course.isMajor ? -60 : 0;
+  } else if (slotIndex === 1) {
+    // 2. seans: Ana dersler 1. seansı tercih etsin (+140), diğer dersler için çok küçük fark (+18)
+    cost += course.isMajor ? 140 : 18;
+  } else {
+    // 3. seans (slotIndex >= 2): İlk 2 seansta yer varken 3. seans kullanılmasın!
+    cost += 4500 + (slotIndex * 500);
+    // Okul geneli kademeler arası ortak derslerin (distinctBaseGrades >= 2) veya Ana derslerin 3. seansa konmasına ekstra ağır ceza!
+    if (isMultiGradeShared) {
+      cost += 25000 + (distinctBaseGrades * 3000);
+    } else if (isSingleGradeMultiTrack) {
+      cost += 6000;
+    }
+    if (course.isMajor) {
+      cost += 35000;
+    }
+  }
+
+  // 3. OKUL GENELİ GÜNLÜK DENGE (TÜM GÜNLERE HOMOJEN YAYILIM):
+  // Hiç sınav olmayan günlere öncelik vererek hiçbir günün boş kalmamasını sağlar
+  if (schoolDailyCardsCount === 0) {
+    cost -= 500;
+  }
+  cost += (schoolDailyLevelLoad * 28) + (schoolDailyCardsCount * 45);
+
+  // 4. ANA DERS / ZORLUK DENGESİ VE ALAN (11-SAY / 11-EA) ÇAPRAZ BLOKAJ ÖNLEME:
+  // Bir sınıfta o gün zaten bir Ana Ders (isMajor) varsa, yanına 2. sınav olarak
+  // okul geneli ağır ortak ders yerine mümkünse daha hafif derslerin gelmesini teşvik et
+  if (hasMajorOnDayForLevels && isMultiGradeShared) {
+    cost += 65;
+  }
+
+  // Alan Çapraz Blokaj Önleme (Sibling Track Alignment):
+  // Örn: Bir günde 1. seansta Fizik (9,10,11-SAY,12) varken 2. seansa Coğrafya (9,10,11-EA,12) konursa,
+  // o günün hem 1. seansı (11-SAY dolu) hem 2. seansı (11-EA dolu) 11. sınıf ortak derslerine (Tefsir, Hitabet vb.) kapanır!
+  // Bunu önlemek için, aynı seansta (slot) paralel yerleşimi ödüllendir, farklı seansta çapraz blokajı cezalandır.
+  const has11Say = course.levels.includes('11-SAY');
+  const has11Ea = course.levels.includes('11-EA');
+  if (has11Say !== has11Ea) {
+    const oppositeTrack = has11Say ? '11-EA' : '11-SAY';
+    const sameSlotOpposite = dayPlacements.some(
+      p => Number(p.slot) === Number(slot) && p.levels.includes(oppositeTrack) && !p.levels.includes(has11Say ? '11-SAY' : '11-EA')
+    );
+    const diffSlotOppositeOnly = dayPlacements.some(
+      p => Number(p.slot) !== Number(slot) && p.levels.includes(oppositeTrack) && !p.levels.includes(has11Say ? '11-SAY' : '11-EA')
+    );
+    if (sameSlotOpposite) {
+      cost -= 180; // Aynı seansta 11-SAY ve 11-EA paralel sınav oluyor -> Harika!
+    } else if (diffSlotOppositeOnly) {
+      cost += 900; // Farklı seansta 11-SAY ve 11-EA çaprazlanıp iki seansı birden kapatıyor -> Kaçın!
+    }
+  }
+
+  // 5. GÜNLER ARASI EŞİTLİK BOZUCU (TIE-BREAKER):
+  // Maliyetler eşit olduğunda ilk günlere yığılmak yerine takvime homojen dağılım
+  cost += (dateIndex / Math.max(1, totalDays)) * 5;
+
+  return cost;
+};
+
+/**
+ * Üretilen bir sınav takviminin genel kalite ve denge puanını hesaplar (Düşük puan = Daha iyi takvim).
+ * Çoklu geçiş (multi-pass) sonucunda en dengeli takvimi seçmek için kullanılır.
+ */
+const evaluateScheduleQuality = ({ placements, unplacedCourses, validDates, sortedSlots, grades }) => {
+  // 1. Yerleşemeyen ders/kademe sayısı (En kritik kriter)
+  const unplacedLevelCount = unplacedCourses.reduce((acc, c) => acc + (c.levels?.length || 1), 0);
+
+  // 2. Boş kalan gün sayısı
+  let emptyDaysCount = 0;
+  const dailyLoads = [];
+
+  for (const date of validDates) {
+    const dayCards = placements.filter(p => p.date === date);
+    if (dayCards.length === 0) emptyDaysCount++;
+    const load = dayCards.reduce((acc, p) => acc + (p.levels?.length || 1), 0);
+    dailyLoads.push(load);
+  }
+
+  // 3. 3. sınava kalan sınıf-gün sayısı ve 3. seanstaki okul geneli ortak ders sayısı
+  let thirdExamGradeDayInstances = 0;
+  let sharedInThirdSlotCount = 0;
+  const thirdSlotValues = new Set(sortedSlots.slice(2).map(Number));
+
+  for (const p of placements) {
+    if (!p.isMebExam && thirdSlotValues.has(Number(p.slot)) && getDistinctBaseGradesCount(p) >= 2) {
+      sharedInThirdSlotCount++;
+    }
+  }
+
+  for (const date of validDates) {
+    const dayCards = placements.filter(p => p.date === date);
+    for (const grade of grades) {
+      const cnt = dayCards.filter(p => p.levels.includes(grade)).length;
+      if (cnt >= 3) {
+        thirdExamGradeDayInstances += (cnt - 2);
+      }
+    }
+  }
+
+  // 4. Günlük sınav yükü standart sapması / varyansı (Denge ölçütü)
+  const avgLoad = dailyLoads.reduce((a, b) => a + b, 0) / Math.max(1, dailyLoads.length);
+  const variance = dailyLoads.reduce((acc, val) => acc + Math.pow(val - avgLoad, 2), 0) / Math.max(1, dailyLoads.length);
+
+  return (
+    unplacedLevelCount * 10000000 +
+    sharedInThirdSlotCount * 500000 +
+    thirdExamGradeDayInstances * 50000 +
+    emptyDaysCount * 25000 +
+    variance * 100
+  );
+};
+
+/**
+ * Tek bir ders sıralaması için ortak sınav yerleştirme denemesi (Best-Fit Balanced Daily Cap algoritması)
+ */
+const runSinglePassSchedule = ({
+  courses,
+  fixedPlacements = [],
+  validDates,
+  sortedSlots,
+  maxExamsPerDay,
+  availabilityCache = null,
+  enforceGroupRule = true,
+  enforceBranchAvailability = true
+}) => {
+  // MEB ortak sınavları başlangıçta sabitlenmiş olarak başlar
+  const placements = fixedPlacements.map(fp => ({
+    ...fp,
+    levels: [...(fp.levels || [])]
+  }));
+  const unplacedCourses = [];
+  const totalDays = validDates.length;
+
+  for (const course of courses) {
+    const normCourseName = normalizeTr(course.name);
+    let bestCandidate = null;
+    let bestCost = Infinity;
+
+    for (let dateIndex = 0; dateIndex < totalDays; dateIndex++) {
+      const date = validDates[dateIndex];
+
+      // KURAL 4: Zümre Öğretmeni Okulda Bulunma Zorunluluğu (MEB sınavı olmayan dersler için)
+      if (enforceBranchAvailability && !course.isMebExam && availabilityCache) {
+        const cacheKey = `${normCourseName}__${date}`;
+        const branchInfo = availabilityCache.get(cacheKey);
+        if (branchInfo && branchInfo.hasTeachers && !branchInfo.isAvailable) {
+          continue; // O gün bu zümreden hiçbir öğretmen okulda değil, bu günü atla!
+        }
+      }
+
+      for (let slotIndex = 0; slotIndex < sortedSlots.length; slotIndex++) {
+        const slot = sortedSlots[slotIndex];
+        let hasConflict = false;
+
+        for (const level of course.levels) {
+          // KURAL 1: Günde Maksimum Sınav Kuralı (Hard Limit)
+          const dailyExamsCount = placements.filter(
+            p => p.date === date && p.levels.includes(level)
+          ).length;
+          if (dailyExamsCount >= maxExamsPerDay) {
+            hasConflict = true;
+            break;
+          }
+
+          // KURAL 2: Aynı saatte (aynı slot) bu sınıfın başka sınavı var mı?
+          const slotOccupied = placements.some(
+            p => p.date === date && Number(p.slot) === Number(slot) && p.levels.includes(level)
+          );
+          if (slotOccupied) {
+            hasConflict = true;
+            break;
+          }
+
+          // KURAL 3: Ana Dersler Aynı Güne Çakışamaz Kuralı
+          if (enforceGroupRule && course.isMajor) {
+            const hasAnotherMajor = placements.some(
+              p => p.date === date && p.isMajor && p.levels.includes(level)
+            );
+            if (hasAnotherMajor) {
+              hasConflict = true;
+              break;
+            }
+          }
+        }
+
+        if (!hasConflict) {
+          const candidateCost = evaluatePlacementCost({
+            course,
+            date,
+            dateIndex,
+            totalDays,
+            slot,
+            slotIndex,
+            placements
+          });
+
+          if (candidateCost < bestCost) {
+            bestCost = candidateCost;
+            bestCandidate = { date, slot: Number(slot) };
+          }
+        }
+      }
+    }
+
+    if (bestCandidate) {
+      placements.push({
+        id: `pl_${course.id}_${Math.random().toString(36).substring(2, 7)}`,
+        courseId: course.id,
+        name: course.name,
+        code: course.code || '',
+        isMajor: !!course.isMajor,
+        isMebExam: false,
+        levels: [...course.levels],
+        date: bestCandidate.date,
+        slot: bestCandidate.slot
+      });
+    } else {
+      unplacedCourses.push(course);
+    }
+  }
+
+  return { placements, unplacedCourses };
+};
+
+/**
  * Otomatik Ortak Sınav Dağıtım Fonksiyonu
  */
 export const solveExamSchedule = ({
@@ -68,8 +876,12 @@ export const solveExamSchedule = ({
   endDate,
   selectedDates = null, // Kullanıcının takvimden bizzat seçtiği günler
   examSlots = [3, 5], // Sınavın yapılacağı ders saatleri (örn: 3. ve 5. ders)
-  grades = ["9", "10", "11", "12"],
-  subjectsByGrade = {}, // { "9": [ { id, name, isMajor }, ... ] }
+  grades = ["9", "10", "11-SAY", "11-EA", "12"],
+  subjectsByGrade = {}, // { "9": [ { id, name, isMajor, isMebExam, mebDate, mebSlot }, ... ] }
+  teachers = [],
+  classrooms = [],
+  timetable = {},
+  periodsPerDay = 8
 }) => {
   let workingDays = [];
   if (selectedDates && Array.isArray(selectedDates) && selectedDates.length > 0) {
@@ -80,199 +892,268 @@ export const solveExamSchedule = ({
   } else {
     workingDays = getWorkingDaysBetween(startDate, endDate);
   }
-  
+
+  // Seansları sırala (küçükten büyüğe, örn: [3, 5])
+  const sortedSlots = [...(examSlots?.length ? examSlots : [3, 5])].map(Number).sort((a, b) => a - b);
+  const firstSlot = sortedSlots[0] || 3;
+  const maxExamsPerDay = sortedSlots.length || 2;
+
+  // 🛡️ 1. ADIM: MEB Ortak Sınavlarını ve Okul İçi Ortak Sınavları Ayrıştır
+  const mebGroupMap = new Map(); // key: `${displayName}__${mebDate}__${resolvedSlot}`
+  const courseMap = new Map();   // key: `${displayName}` (Sadece MEB sınavı OLMAYAN kademeler)
+
+  grades.forEach(grade => {
+    const gradeSubjects = subjectsByGrade?.[grade] || [];
+    gradeSubjects.forEach(sub => {
+      if (!sub) return;
+      const displayName = (sub.name || '').trim().toLocaleUpperCase('tr-TR');
+      if (!displayName) return;
+
+      const hasValidMebDate = Boolean(
+        sub.isMebExam &&
+        typeof sub.mebDate === 'string' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(sub.mebDate.trim())
+      );
+
+      if (hasValidMebDate) {
+        const cleanDate = sub.mebDate.trim();
+        if (!workingDays.some(wd => wd.date === cleanDate)) {
+          const extraDay = formatExamDay(cleanDate);
+          if (extraDay) {
+            workingDays.push(extraDay);
+            workingDays.sort((a, b) => a.date.localeCompare(b.date));
+          }
+        }
+
+        const requestedSlot = Number(sub.mebSlot);
+        const resolvedSlot = (!isNaN(requestedSlot) && requestedSlot > 0)
+          ? requestedSlot
+          : firstSlot;
+
+        const mebKey = `${displayName}__${cleanDate}__${resolvedSlot}`;
+        if (!mebGroupMap.has(mebKey)) {
+          mebGroupMap.set(mebKey, {
+            id: `pl_meb_${sub.id || displayName.replace(/[^A-Z0-9]/g, '')}_${cleanDate}_${resolvedSlot}`,
+            courseId: sub.id || `meb_${displayName}`,
+            name: displayName,
+            code: sub.code || '',
+            isMajor: !!sub.isMajor,
+            isMebExam: true,
+            mebDate: cleanDate,
+            mebSlot: resolvedSlot,
+            levels: [grade],
+            date: cleanDate,
+            slot: resolvedSlot
+          });
+        } else {
+          const existingMeb = mebGroupMap.get(mebKey);
+          if (!existingMeb.levels.includes(grade)) {
+            existingMeb.levels.push(grade);
+          }
+          if (sub.isMajor) existingMeb.isMajor = true;
+        }
+      } else {
+        if (!courseMap.has(displayName)) {
+          courseMap.set(displayName, {
+            id: sub.id || `c_${Math.random().toString(36).substring(2, 7)}`,
+            name: displayName,
+            code: sub.code || '',
+            isMajor: !!sub.isMajor,
+            isMebExam: false,
+            levels: [grade]
+          });
+        } else {
+          const existing = courseMap.get(displayName);
+          if (!existing.levels.includes(grade)) {
+            existing.levels.push(grade);
+          }
+          if (sub.isMajor) {
+            existing.isMajor = true;
+          }
+        }
+      }
+    });
+  });
+
   if (workingDays.length === 0) {
     return {
       success: false,
       message: "Seçilen sınav günleri listesi boş veya geçerli bir iş günü bulunamadı!",
       schedule: {},
+      placements: [],
       unassigned: []
     };
   }
 
-  // Seansları sırala (küçükten büyüğe, örn: [3, 5])
-  const sortedSlots = [...examSlots].sort((a, b) => Number(a) - Number(b));
-  const firstSlot = sortedSlots[0]; // Günün ilk sınavı
-  const otherSlots = sortedSlots.slice(1); // Günün sonraki sınavları
+  const validDates = workingDays.map(d => d.date);
 
-  // schedule yapısı: grade -> date -> slotNumber -> subjectObj
-  const schedule = {};
-  const unassigned = [];
-  const availableDaysCount = workingDays.length;
-
-  grades.forEach(grade => {
-    schedule[grade] = {};
-    workingDays.forEach(day => {
-      schedule[grade][day.date] = {};
-    });
-  });
-
-  // 🚨 ÖZEL KURAL 1: Matematik Sınavları MUTLAKA AYNI GÜN ve İLK SEANSTA Yapılmalı!
-  const isMathSubject = (name = '', code = '') => {
-    const s = `${name} ${code}`.toUpperCase();
-    return s.includes('MAT') || s.includes('GEOMETRİ') || s.includes('GEOM');
-  };
-
-  // 🚨 ÖZEL KURAL 2: Edebiyat Sınavları MUTLAKA TÜM OKULDA AYNI GÜN ve İLK SEANSTA Yapılmalı!
-  const isLiteratureSubject = (name = '', code = '') => {
-    const s = `${name} ${code}`.toUpperCase();
-    return s.includes('EDEB') || s.includes('TDEB') || s.includes('TÜRK DİLİ') || s.includes('TURK DILI');
-  };
-
-  // Matematik sınavı için ideal ortak bir iş günü seçelim (örn: 2. iş günü, Salı vb.)
-  const mathDayIndex = availableDaysCount >= 3 ? 1 : 0;
-  const mathDay = workingDays[mathDayIndex];
-
-  // Edebiyat sınavı için ideal ayrı bir ortak iş günü seçelim (örn: 4. iş günü veya matematik ile çakışmayan gün)
-  let literatureDayIndex = -1;
-  if (availableDaysCount >= 5) {
-    literatureDayIndex = 3; // 4. iş günü (Perşembe)
-  } else if (availableDaysCount >= 3) {
-    literatureDayIndex = mathDayIndex === 1 ? 2 : 1;
-  } else if (availableDaysCount >= 2) {
-    literatureDayIndex = mathDayIndex === 0 ? 1 : 0;
-  }
-  const literatureDay = literatureDayIndex !== -1 ? workingDays[literatureDayIndex] : null;
-
-  // 1. Ortak Matematik Sınavını Kilitle
-  grades.forEach(grade => {
-    const gradeSubjects = subjectsByGrade[grade] || [];
-    const mathSub = gradeSubjects.find(s => isMathSubject(s.name, s.code));
-    if (mathSub && mathDay) {
-      schedule[grade][mathDay.date][firstSlot] = {
-        ...mathSub,
-        slot: firstSlot,
-        isMajor: true,
-        isFirstSlotOfMajor: true,
-        isCommonMathExam: true
-      };
+  // 🛡️ 2. ADIM: Aynı gün ve aynı seansa denk gelen farklı MEB sınavları aynı sınıfta çakışıyorsa seans kaydırması yap
+  const fixedMebPlacements = [];
+  Array.from(mebGroupMap.values()).forEach(mebPl => {
+    let targetSlot = mebPl.slot;
+    const hasSlotConflict = fixedMebPlacements.some(
+      fp => fp.date === mebPl.date && Number(fp.slot) === Number(targetSlot) && fp.levels.some(l => mebPl.levels.includes(l))
+    );
+    if (hasSlotConflict) {
+      const altSlot = sortedSlots.find(s => !fixedMebPlacements.some(
+        fp => fp.date === mebPl.date && Number(fp.slot) === Number(s) && fp.levels.some(l => mebPl.levels.includes(l))
+      ));
+      if (altSlot !== undefined) targetSlot = altSlot;
     }
+    fixedMebPlacements.push({ ...mebPl, slot: Number(targetSlot) });
   });
 
-  // 2. Ortak Edebiyat Sınavını Kilitle (Tüm Okul Aynı Anda)
-  if (literatureDay && literatureDayIndex !== mathDayIndex) {
-    grades.forEach(grade => {
-      const gradeSubjects = subjectsByGrade[grade] || [];
-      const litSub = gradeSubjects.find(s => isLiteratureSubject(s.name, s.code) && s.isMajor);
-      if (litSub) {
-        schedule[grade][literatureDay.date][firstSlot] = {
-          ...litSub,
-          slot: firstSlot,
-          isMajor: true,
-          isFirstSlotOfMajor: true,
-          isCommonLiteratureExam: true
-        };
-      }
+  const unifiedCourses = Array.from(courseMap.values());
+
+  // 🛡️ 3. ADIM: Zümre Öğretmeni Uygunluk Önbelleğini (Cache) Hesapla
+  const availabilityCache = buildBranchAvailabilityCache({
+    courses: unifiedCourses,
+    workingDays,
+    teachers,
+    classrooms,
+    timetable,
+    periodsPerDay
+  });
+
+  // 🛡️ 4. ADIM: 3 Katmanlı (Ana Dersler -> Okul Geneli Ortak -> Lokal Dersler) Çoklu Geçiş Optimizasyonu
+  const candidateOrders = buildTieredCourseOrders(unifiedCourses, validDates, availabilityCache, 8);
+
+  let bestResult = null;
+  let bestQualityScore = Infinity;
+
+  for (const orderCourses of candidateOrders) {
+    const res = runSinglePassSchedule({
+      courses: orderCourses,
+      fixedPlacements: fixedMebPlacements,
+      validDates,
+      sortedSlots,
+      maxExamsPerDay,
+      availabilityCache,
+      enforceGroupRule: true,
+      enforceBranchAvailability: true
     });
+
+    const qualityScore = evaluateScheduleQuality({
+      placements: res.placements,
+      unplacedCourses: res.unplacedCourses,
+      validDates,
+      sortedSlots,
+      grades
+    });
+
+    if (qualityScore < bestQualityScore) {
+      bestQualityScore = qualityScore;
+      bestResult = res;
+    }
   }
 
-  grades.forEach(grade => {
-    const gradeSubjects = subjectsByGrade[grade] || [];
-    // Matematik ve Edebiyat zaten ortak günlere yerleştiyse onları ayır
-    const remainingSubjects = gradeSubjects.filter(s => {
-      const placedInMath = schedule[grade][mathDay?.date]?.[firstSlot];
-      const isPlacedInMath = placedInMath && (placedInMath.id === s.id || (placedInMath.name === s.name && placedInMath.code === s.code));
-      const placedInLit = literatureDay && schedule[grade][literatureDay.date]?.[firstSlot];
-      const isPlacedInLit = placedInLit && (placedInLit.id === s.id || (placedInLit.name === s.name && placedInLit.code === s.code));
-      return !isPlacedInMath && !isPlacedInLit;
-    });
+  const finalPlacements = [...bestResult.placements];
+  const unassigned = [];
 
-    // Ana dersler ve Yan dersler olarak ikiye ayır
-    const majorSubjects = remainingSubjects.filter(s => s.isMajor);
-    const minorSubjects = remainingSubjects.filter(s => !s.isMajor);
-    
-    // 1. ADIM: KALAN ANA DERSLERİ GÜNLERE DAĞIT (HER GÜNE EN FAZLA 1 ANA DERS VE İLK SEANSA)
-    // Matematik ve Edebiyat günlerini ana dersler için dolu kabul ediyoruz
-    const usedMajorDays = [];
-    if (schedule[grade][mathDay?.date]?.[firstSlot]) usedMajorDays.push(mathDayIndex);
-    if (literatureDay && schedule[grade][literatureDay.date]?.[firstSlot]) usedMajorDays.push(literatureDayIndex);
-    
-    majorSubjects.forEach(sub => {
-      // Boş bir gün bul (mümkünse aralıklı)
-      let chosenDayIndex = -1;
-      for (let i = 0; i < availableDaysCount; i++) {
-        if (!usedMajorDays.includes(i) && !schedule[grade][workingDays[i].date]?.[firstSlot]) {
-          chosenDayIndex = i;
-          break;
+  // 🛡️ 5. ADIM: Ortak olarak aynı saate sığmayan ders varsa kademe bazlı en dengeli boş slotlara (Best-Fit + Zümre kuralı) yerleştirmeyi dene
+  bestResult.unplacedCourses.forEach(course => {
+    const remainingLevels = [];
+    const normCourseName = normalizeTr(course.name);
+    let blockedByBranchEveryDay = true;
+
+    for (const date of validDates) {
+      const bInfo = availabilityCache.get(`${normCourseName}__${date}`);
+      if (!bInfo || !bInfo.hasTeachers || bInfo.isAvailable) {
+        blockedByBranchEveryDay = false;
+        break;
+      }
+    }
+
+    course.levels.forEach(level => {
+      let bestLevelCandidate = null;
+      let bestLevelCost = Infinity;
+      const singleLevelCourse = { ...course, levels: [level] };
+
+      for (let dateIndex = 0; dateIndex < validDates.length; dateIndex++) {
+        const date = validDates[dateIndex];
+        const branchInfo = availabilityCache.get(`${normCourseName}__${date}`);
+        if (branchInfo && branchInfo.hasTeachers && !branchInfo.isAvailable) {
+          continue;
+        }
+
+        for (let slotIndex = 0; slotIndex < sortedSlots.length; slotIndex++) {
+          const slot = sortedSlots[slotIndex];
+          const dailyCount = finalPlacements.filter(p => p.date === date && p.levels.includes(level)).length;
+          if (dailyCount >= maxExamsPerDay) continue;
+          const occupied = finalPlacements.some(p => p.date === date && Number(p.slot) === Number(slot) && p.levels.includes(level));
+          if (occupied) continue;
+          if (course.isMajor && finalPlacements.some(p => p.date === date && p.isMajor && p.levels.includes(level))) continue;
+
+          let candidateCost = evaluatePlacementCost({
+            course: singleLevelCourse,
+            date,
+            dateIndex,
+            totalDays: validDates.length,
+            slot,
+            slotIndex,
+            placements: finalPlacements
+          });
+
+          // Aynı dersin başka bir kademesi zaten bu gün ve seansta varsa birleştirme bonusu ver
+          const sameCourseSlot = finalPlacements.find(
+            p => p.date === date && Number(p.slot) === Number(slot) && p.name === course.name && !p.isMebExam
+          );
+          if (sameCourseSlot) {
+            candidateCost -= 200;
+          }
+
+          if (candidateCost < bestLevelCost) {
+            bestLevelCost = candidateCost;
+            bestLevelCandidate = { date, slot: Number(slot), sameCourseSlot };
+          }
         }
       }
 
-      if (chosenDayIndex !== -1) {
-        usedMajorDays.push(chosenDayIndex);
-        const day = workingDays[chosenDayIndex];
-        schedule[grade][day.date][firstSlot] = {
-          ...sub,
-          slot: firstSlot,
-          isFirstSlotOfMajor: true
-        };
+      if (bestLevelCandidate) {
+        if (bestLevelCandidate.sameCourseSlot) {
+          bestLevelCandidate.sameCourseSlot.levels.push(level);
+        } else {
+          finalPlacements.push({
+            id: `pl_${course.id}_${level}_${Math.random().toString(36).substring(2, 6)}`,
+            courseId: course.id,
+            name: course.name,
+            code: course.code || '',
+            isMajor: !!course.isMajor,
+            isMebExam: false,
+            levels: [level],
+            date: bestLevelCandidate.date,
+            slot: bestLevelCandidate.slot
+          });
+        }
       } else {
+        remainingLevels.push(level);
+      }
+    });
+
+    if (remainingLevels.length > 0) {
+      remainingLevels.forEach(grade => {
         unassigned.push({
           grade,
-          subject: sub,
-          reason: "İş günü sayısı ana ders sayısından az olduğu için ayrı güne sığmadı."
+          subject: { id: course.id, name: course.name, isMajor: course.isMajor },
+          reason: blockedByBranchEveryDay
+            ? `"${course.name}" zümre öğretmenlerinin tamamı seçili sınav günlerinde kapalı görünüyor.`
+            : `"${course.name}" dersi için zümre öğretmenlerinin okulda olduğu günlerde uygun/boş sınav seansı kalmadı.`
         });
-      }
-    });
-
-    // 2. ADIM: YAN DERSLERİ DAĞIT
-    // Yan dersler:
-    // - Önce ana ders olan günlerin diğer seanslarına (otherSlots)
-    // - Sonra ana ders olmayan boş günlerin ilk veya diğer seanslarına yerleştirilir
-    const minorQueue = [...minorSubjects];
-
-    // Önce ana ders konmuş günlerin 2., 3. seanslarını doldurmayı dene
-    for (const day of workingDays) {
-      const daySchedule = schedule[grade][day.date];
-      if (daySchedule[firstSlot]) {
-        // O gün ana ders var, kalan diğer seanslara yan ders koy
-        for (const slot of otherSlots) {
-          if (minorQueue.length > 0) {
-            const sub = minorQueue.shift();
-            daySchedule[slot] = {
-              ...sub,
-              slot
-            };
-          }
-        }
-      }
-    }
-
-    // Eğer hâlâ yan ders varsa, ana ders konmamış tamamen boş günlere yerleştir
-    for (const day of workingDays) {
-      const daySchedule = schedule[grade][day.date];
-      if (!daySchedule[firstSlot]) {
-        // Bu gün boş
-        for (const slot of sortedSlots) {
-          if (minorQueue.length > 0 && !daySchedule[slot]) {
-            const sub = minorQueue.shift();
-            daySchedule[slot] = {
-              ...sub,
-              slot
-            };
-          }
-        }
-      }
-    }
-
-    // Hâlâ yerleşemeyen yan ders kaldıysa
-    while (minorQueue.length > 0) {
-      const sub = minorQueue.shift();
-      unassigned.push({
-        grade,
-        subject: sub,
-        reason: "Sınav tarih aralığındaki seans kapasitesi yetersiz kaldı."
       });
     }
   });
 
+  const schedule = buildScheduleFromPlacements(finalPlacements, grades, workingDays, subjectsByGrade);
+
   return {
     success: unassigned.length === 0,
     schedule,
+    placements: finalPlacements,
     workingDays,
     examSlots: sortedSlots,
     firstSlot,
     unassigned,
-    totalSubjects: Object.values(subjectsByGrade).reduce((acc, list) => acc + (list?.length || 0), 0)
+    totalSubjects: Object.values(subjectsByGrade || {}).reduce((acc, list) => acc + (list?.length || 0), 0)
   };
 };
 
@@ -326,11 +1207,11 @@ export const DEFAULT_EXAM_SUBJECTS = {
     { id: "s11s_12", name: "Hitabet", code: "HITAB", isMajor: false }
   ],
   "11-EA": [
-    // ⚖️ 11. SINIF EŞİT AĞIRLIK: Ana Dersler: Matematik, Edebiyat, Tarih, Coğrafya
+    // ⚖️ 11. SINIF EŞİT AĞIRLIK
     { id: "s11e_1", name: "Matematik", code: "MAT4", isMajor: true },
     { id: "s11e_2", name: "Türk Dili ve Edebiyatı", code: "TDEB", isMajor: true },
-    { id: "s11e_3", name: "Tarih", code: "TARİH", isMajor: true },
-    { id: "s11e_4", name: "Coğrafya", code: "COGRFY", isMajor: true },
+    { id: "s11e_3", name: "Tarih", code: "TARİH", isMajor: false },
+    { id: "s11e_4", name: "Coğrafya", code: "COGRFY", isMajor: false },
     { id: "s11e_5", name: "Seçmeli Edebiyat", code: "STEDB", isMajor: false },
     { id: "s11e_6", name: "Felsefe", code: "11FEL", isMajor: false },
     { id: "s11e_7", name: "Psikoloji", code: "PSKO", isMajor: false },

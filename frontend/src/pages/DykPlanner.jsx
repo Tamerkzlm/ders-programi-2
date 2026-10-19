@@ -73,6 +73,7 @@ export default function DykPlanner() {
     deleteDykGroup,
     addDykAssignment,
     addMultipleDykAssignments,
+    updateDykAssignment,
     deleteDykAssignment,
     setDykTeacherAvailability,
     setDykSchedule,
@@ -427,6 +428,17 @@ export default function DykPlanner() {
     "İngilizce"
   ];
 
+  const resolveTeacherSubject = (teacher) => {
+    if (teacher.branch) {
+      const matched = DYK_TARGET_BRANCHES.find(b => 
+        b.toLowerCase().includes(teacher.branch.toLowerCase()) || 
+        teacher.branch.toLowerCase().includes(b.toLowerCase())
+      );
+      return matched || teacher.branch;
+    }
+    return assignSubject || "Matematik";
+  };
+
   // ⚡ 1-Tıkla Otomatik Eşleştirme ve Tekrar Tıklamayla Eşleştirmeyi Kaldırma (Toggle)
   const handleToggleTeacherAssignment = (teacher) => {
     if (!assignClassId) {
@@ -439,19 +451,10 @@ export default function DykPlanner() {
     );
 
     if (existingAsg) {
-      // Tekrar tıklandığında eşleştirme anında kaldırılır
       deleteDykAssignment(existingAsg.id);
       showToast(`"${teacher.name}" öğretmeninin "${getGroupName(assignClassId)}" sınıfındaki ${existingAsg.subject} ataması kaldırıldı.`);
     } else {
-      // Bir kez tıklandığında otomatik eşleşir
-      let subjectToUse = assignSubject;
-      if (teacher.branch) {
-        const matched = DYK_TARGET_BRANCHES.find(b => 
-          b.toLowerCase().includes(teacher.branch.toLowerCase()) || 
-          teacher.branch.toLowerCase().includes(b.toLowerCase())
-        );
-        subjectToUse = matched || teacher.branch;
-      }
+      const subjectToUse = resolveTeacherSubject(teacher);
       const blocks = Number(assignBlocks) || 1;
 
       addDykAssignment({
@@ -463,7 +466,40 @@ export default function DykPlanner() {
 
       setAssignTeacherId(teacher.id);
       setAssignSubject(subjectToUse);
-      showToast(`✓ "${teacher.name}" (${subjectToUse}) "${getGroupName(assignClassId)}" sınıfına eşlendi.`);
+      showToast(`✓ "${teacher.name}" (${subjectToUse} · ${blocks} Blok) "${getGroupName(assignClassId)}" sınıfına eşlendi.`);
+    }
+  };
+
+  // 🎯 Öğretmen Kartı Üzerinden Doğrudan Blok Sayısı Seçme / Güncelleme
+  const handleSetTeacherBlockCount = (e, teacher, blockCount) => {
+    e.stopPropagation();
+    if (!assignClassId) {
+      showToast("Lütfen önce sol sütundan eşleştirmek istediğiniz sınıf kartını seçin.");
+      return;
+    }
+
+    const blocks = Number(blockCount) || 1;
+    const existingAsg = dykAssignments.find(
+      (a) => a.groupId === assignClassId && a.teacherId === teacher.id
+    );
+
+    if (existingAsg) {
+      if (Number(existingAsg.blocksPerWeek) === blocks) {
+        return;
+      }
+      updateDykAssignment(existingAsg.id, { blocksPerWeek: blocks });
+      showToast(`✓ "${teacher.name}" (${existingAsg.subject}) haftalık yükü ${blocks} Blok (${blocks * 2} Saat) olarak güncellendi.`);
+    } else {
+      const subjectToUse = resolveTeacherSubject(teacher);
+      addDykAssignment({
+        groupId: assignClassId,
+        teacherId: teacher.id,
+        subject: subjectToUse,
+        blocksPerWeek: blocks
+      });
+      setAssignTeacherId(teacher.id);
+      setAssignSubject(subjectToUse);
+      showToast(`✓ "${teacher.name}" (${subjectToUse} · ${blocks} Blok) "${getGroupName(assignClassId)}" sınıfına eşlendi.`);
     }
   };
 
@@ -1400,18 +1436,17 @@ export default function DykPlanner() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
                 {dykGroups.map(group => {
                   const groupAssignments = dykAssignments.filter(a => a.groupId === group.id);
                   const totalBlocks = groupAssignments.reduce((sum, a) => sum + (Number(a.blocksPerWeek) || 1), 0);
-                  const is11or12 = group.grade === '11' || group.grade === '12';
 
                   return (
                     <div 
                       key={group.id}
                       className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col justify-between hover:border-emerald-200 transition-all group relative"
                     >
-                      <div className="space-y-2">
+                      <div className="space-y-2.5">
                         <div className="flex items-center justify-between">
                           <span className={`text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider ${
                             group.branch === 'SAY' 
@@ -1446,13 +1481,38 @@ export default function DykPlanner() {
                           </button>
                         </div>
 
-                        <div>
+                        <div className="flex items-baseline justify-between">
                           <h4 className="font-extrabold text-slate-900 text-sm">
                             {group.name}
                           </h4>
-                          <p className="text-[11px] text-slate-500">
-                            {groupAssignments.length} Farklı Kurs Dersi
-                          </p>
+                          <span className="text-[11px] font-bold text-slate-500">
+                            {groupAssignments.length} Ders
+                          </span>
+                        </div>
+
+                        {/* Atanan Dersler ve Öğretmenler Listesi */}
+                        <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                          {groupAssignments.length === 0 ? (
+                            <p className="text-[11px] text-slate-400 italic py-1">
+                              Henüz ders/öğretmen atanmadı
+                            </p>
+                          ) : (
+                            groupAssignments.map(asg => (
+                              <div
+                                key={asg.id}
+                                className="flex items-center justify-between gap-1.5 text-[11px] bg-slate-50/90 border border-slate-200/70 rounded-xl px-2.5 py-1.5"
+                              >
+                                <div className="min-w-0 truncate">
+                                  <span className="font-extrabold text-emerald-800">{asg.subject}</span>
+                                  <span className="text-slate-400 mx-1">·</span>
+                                  <span className="font-semibold text-slate-700">{getTeacherName(asg.teacherId)}</span>
+                                </div>
+                                <span className="text-[10px] font-black text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded shrink-0">
+                                  {asg.blocksPerWeek} Blok
+                                </span>
+                              </div>
+                            ))
+                          )}
                         </div>
                       </div>
 
@@ -1800,6 +1860,8 @@ export default function DykPlanner() {
 
             {/* 🌟 GÖRSEL EŞLEŞTİRME MASASI: SINIF KARTI ⇄ ÖĞRETMEN KARTI */}
             <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-5">
+              
+              {/* Üst Başlık ve Hızlı Toplu Eşleştirme Aksiyonları */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
@@ -1807,113 +1869,250 @@ export default function DykPlanner() {
                     <span>Sınıf ve Öğretmen Kartı Eşleştirme Masası</span>
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Sol panelden bir <strong>Sınıf Kartı</strong>, sağ panelden bir <strong>Öğretmen Kartı</strong> seçin; ders ve blok saatini belirleyip eşleştirin.
+                    Sol panelden bir <strong>Sınıf Kartı</strong> seçin, sağ panelden öğretmenin <strong>kaç bloğa gireceğini (1, 2 veya 3 Blok)</strong> seçerek eşleştirin. Atanan dersler ve öğretmenler doğrudan sınıf kartı içinde listelenir.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                  <span>Görsel Kart Eşleştirme Aktif</span>
+                {/* Toplu Eşleştirme Butonları */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleBatchAssignToCurrentClass}
+                    disabled={!assignClassId}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 text-emerald-800 border border-emerald-200 text-xs font-extrabold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                    title="Seçili sınıfa Matematik, Fen/Sosyal branş öğretmenlerini toplu eşler"
+                  >
+                    <CheckSquare size={13} className="text-emerald-700" />
+                    <span>"{getGroupName(assignClassId) || 'Seçili Sınıf'}" Branşları Toplu Eşle</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleBatchAssignAllClassesConfirm}
+                    disabled={dykGroups.length === 0}
+                    className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                    title="Tüm kayıtlı DYK sınıflarına branşlarına uygun öğretmenleri tek onay ile atar"
+                  >
+                    <Layers size={13} />
+                    <span>🚀 Tüm Sınıflara Toplu Eşle</span>
+                  </button>
                 </div>
               </div>
 
               {/* İki Kolonlu Kart Seçim Masası */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
                 
-                {/* 1. SOL KOLON: SINIF KARTLARI */}
-                <div className="space-y-3">
+                {/* 1. SOL KOLON (6 BİRİM): SINIF KARTLARI VE ATANAN DERSLER / ÖĞRETMENLER */}
+                <div className="lg:col-span-6 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                       <GraduationCap size={15} className="text-emerald-600" />
-                      <span>1. Adım: Sınıf Kartı Seçin ({dykGroups.length})</span>
+                      <span>1. Adım: Sınıf Kartları & Kayıtlı Atamalar ({dykGroups.length})</span>
                     </span>
-                    <span className="text-[11px] font-bold text-slate-400">
-                      Seçili: {getGroupName(assignClassId) || 'Seçilmedi'}
+                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/70">
+                      Seçili Sınıf: {getGroupName(assignClassId) || 'Seçilmedi'}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2.5 max-h-[300px] overflow-y-auto pr-1 scrollbar-thin">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[620px] overflow-y-auto pr-1 scrollbar-thin">
                     {dykGroups.map(group => {
                       const isSelected = assignClassId === group.id;
                       const groupAsgs = dykAssignments.filter(a => a.groupId === group.id);
                       const totalBlocks = groupAsgs.reduce((sum, a) => sum + (Number(a.blocksPerWeek) || 1), 0);
 
                       return (
-                        <button
+                        <div
                           key={group.id}
-                          type="button"
                           onClick={() => setAssignClassId(group.id)}
-                          className={`p-3 rounded-2xl border text-left transition-all flex flex-col justify-between gap-2 cursor-pointer relative ${
+                          className={`p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between gap-2.5 cursor-pointer relative ${
                             isSelected
-                              ? 'bg-emerald-50/90 border-emerald-500 shadow-sm ring-2 ring-emerald-500/30'
-                              : 'bg-slate-50/70 hover:bg-slate-100/80 border-slate-200'
+                              ? 'bg-emerald-50/70 border-emerald-500 shadow-sm ring-2 ring-emerald-500/25'
+                              : 'bg-slate-50/50 hover:bg-slate-100/60 border-slate-200'
                           }`}
                         >
-                          <div className="flex items-center justify-between w-full">
-                            <span className="font-extrabold text-xs text-slate-900">
-                              {group.name}
-                            </span>
-                            {isSelected && (
-                              <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                                <Check size={12} strokeWidth={3} />
-                              </span>
-                            )}
+                          {/* Sınıf Kartı Üst Başlık */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between w-full">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-extrabold text-sm text-slate-900">
+                                  {group.name}
+                                </span>
+                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${
+                                  group.branch === 'SAY'
+                                    ? 'bg-blue-100/80 text-blue-800'
+                                    : group.branch === 'EA'
+                                      ? 'bg-amber-100/80 text-amber-800'
+                                      : 'bg-slate-200 text-slate-700'
+                                }`}>
+                                  {group.grade}. Sınıf · {group.branch || 'Genel'}
+                                </span>
+                              </div>
+                              {isSelected && (
+                                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                                  <Check size={12} strokeWidth={3} />
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Sınıf İçindeki Atanan Dersler ve Öğretmenler */}
+                            <div className="pt-2 border-t border-slate-200/70 space-y-1.5">
+                              {groupAsgs.length === 0 ? (
+                                <div className="text-[11px] text-slate-400 italic py-2 text-center bg-white/70 rounded-xl border border-dashed border-slate-200">
+                                  Henüz ders ve öğretmen atanmadı
+                                </div>
+                              ) : (
+                                groupAsgs.map(asg => {
+                                  const currentBlocks = Number(asg.blocksPerWeek) || 1;
+                                  return (
+                                    <div
+                                      key={asg.id}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="flex items-center justify-between gap-1.5 bg-white border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs"
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-[11px] font-extrabold text-emerald-800 truncate leading-tight">
+                                          {asg.subject}
+                                        </div>
+                                        <div className="text-[10px] font-semibold text-slate-600 truncate leading-tight">
+                                          {getTeacherName(asg.teacherId)}
+                                        </div>
+                                      </div>
+
+                                      {/* Sınıf Kartı İçinden Hızlı Blok Değiştirme (1B / 2B / 3B) */}
+                                      <div className="flex items-center gap-0.5 shrink-0">
+                                        {[1, 2, 3].map(b => (
+                                          <button
+                                            key={b}
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              updateDykAssignment(asg.id, { blocksPerWeek: b });
+                                              showToast(`"${asg.subject}" (${getTeacherName(asg.teacherId)}) ${b} Blok (${b * 2} Saat) yapıldı.`);
+                                            }}
+                                            className={`px-1.5 py-0.5 rounded text-[9px] font-black transition-all cursor-pointer ${
+                                              currentBlocks === b
+                                                ? 'bg-emerald-600 text-white shadow-2xs'
+                                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                            }`}
+                                            title={`${b} Blok (${b * 2} Ders Saati) yap`}
+                                          >
+                                            {b}B
+                                          </button>
+                                        ))}
+
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteDykAssignment(asg.id);
+                                            showToast(`"${asg.subject}" (${getTeacherName(asg.teacherId)}) ataması kaldırıldı.`);
+                                          }}
+                                          className="ml-0.5 p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                          title="Atamayı Kaldır"
+                                        >
+                                          <Trash2 size={12} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
                           </div>
 
-                          <div className="flex items-center justify-between text-[11px] w-full pt-1 border-t border-slate-200/60">
-                            <span className="text-slate-500 font-medium">
-                              {group.grade}. Sınıf · {group.branch || 'Genel'}
+                          {/* Sınıf Kartı Alt Özet */}
+                          <div className="flex items-center justify-between text-[11px] w-full pt-1.5 border-t border-slate-200/60">
+                            <span className="text-slate-500 font-semibold">
+                              {groupAsgs.length} Kurs Dersi
                             </span>
-                            <span className={`font-bold ${isSelected ? 'text-emerald-800' : 'text-slate-600'}`}>
-                              {totalBlocks} Blok
+                            <span className={`font-extrabold px-2 py-0.5 rounded-md ${
+                              isSelected ? 'bg-emerald-600 text-white' : 'bg-slate-200/70 text-slate-700'
+                            }`}>
+                              Toplam: {totalBlocks} Blok ({totalBlocks * 2} Sa)
                             </span>
                           </div>
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
                 </div>
 
-                {/* 2. SAĞ KOLON: ÖĞRETMEN KARTLARI */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
+                {/* 2. SAĞ KOLON (6 BİRİM): ÖĞRETMEN KARTLARI VE BLOK SAYISI SEÇİMİ */}
+                <div className="lg:col-span-6 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                       <Users size={15} className="text-emerald-600" />
-                      <span>2. Adım: Öğretmen Kartı Seçin ({dykEligibleTeachers.length})</span>
+                      <span>2. Adım: Öğretmen & Blok Sayısı Seçin ({dykEligibleTeachers.length})</span>
                     </span>
-                    <span className="text-[11px] font-bold text-slate-400">
-                      Seçili: {getTeacherName(assignTeacherId) || 'Seçilmedi'}
-                    </span>
+
+                    {/* Varsayılan Blok Seçici */}
+                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                      <span className="text-[10px] font-bold text-slate-500 px-1.5">Varsayılan:</span>
+                      {[1, 2, 3].map(b => (
+                        <button
+                          key={b}
+                          type="button"
+                          onClick={() => setAssignBlocks(b)}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                            Number(assignBlocks) === b
+                              ? 'bg-emerald-600 text-white shadow-2xs'
+                              : 'text-slate-600 hover:bg-white'
+                          }`}
+                          title={`Kart tıklamasında varsayılan ${b} Blok (${b * 2} Saat) ata`}
+                        >
+                          {b} Blok
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2.5 max-h-[300px] overflow-y-auto pr-1 scrollbar-thin">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[620px] overflow-y-auto pr-1 scrollbar-thin">
                     {dykEligibleTeachers.map(teacher => {
                       const matchedAsg = assignClassId
                         ? dykAssignments.find(a => a.groupId === assignClassId && a.teacherId === teacher.id)
                         : null;
                       const isMatched = !!matchedAsg;
-                      const isSelectedTeacher = assignTeacherId === teacher.id;
+                      const matchedBlocks = matchedAsg ? Number(matchedAsg.blocksPerWeek) || 1 : null;
                       const analysis = teacherSchoolAnalysis[teacher.id] || {};
                       const lateDays = Object.keys(analysis).filter(d => analysis[d]?.hasLatePeriod);
+                      const teacherTotalBlocks = dykAssignments
+                        .filter(a => a.teacherId === teacher.id)
+                        .reduce((sum, a) => sum + (Number(a.blocksPerWeek) || 1), 0);
 
                       return (
-                        <button
+                        <div
                           key={teacher.id}
-                          type="button"
                           onClick={() => handleToggleTeacherAssignment(teacher)}
-                          title={isMatched ? "Eşleşmeyi kaldırmak için tıklayın" : "Seçili sınıfa eşlemek için tıklayın"}
-                          className={`p-3 rounded-2xl border text-left transition-all flex flex-col justify-between gap-2 cursor-pointer relative group ${
+                          title={isMatched ? "Eşleşmeyi kaldırmak için tıklayın" : `Seçili sınıfa (${assignBlocks} Blok) eşlemek için tıklayın`}
+                          className={`p-3 rounded-2xl border text-left transition-all flex flex-col justify-between gap-2.5 cursor-pointer relative group ${
                             isMatched
-                              ? 'bg-emerald-50 border-emerald-500 shadow-sm ring-2 ring-emerald-500/40 text-slate-900'
-                              : isSelectedTeacher
-                              ? 'bg-slate-100/90 border-slate-400'
+                              ? 'bg-emerald-50/90 border-emerald-500 shadow-sm ring-2 ring-emerald-500/30 text-slate-900'
                               : 'bg-white hover:bg-slate-50/90 border-slate-200 hover:border-emerald-300'
                           }`}
                         >
-                          <div className="flex items-center justify-between w-full gap-1">
-                            <span className="font-extrabold text-xs text-slate-900 truncate">
-                              {teacher.name}
-                            </span>
+                          {/* Üst Satır: Öğretmen Adı ve Eşleşme Durumu */}
+                          <div className="flex items-start justify-between w-full gap-1.5">
+                            <div className="min-w-0">
+                              <div className="font-extrabold text-xs text-slate-900 truncate">
+                                {teacher.name}
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/70 px-1.5 py-0.2 rounded">
+                                  {teacher.branch || 'Genel'}
+                                </span>
+                                {lateDays.length > 0 && (
+                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 shrink-0" title={`Son dersi olan günler: ${lateDays.join(', ')}`}>
+                                    ★ Son Ders ({lateDays.length}g)
+                                  </span>
+                                )}
+                                {teacherTotalBlocks > 0 && (
+                                  <span className="text-[9px] font-bold text-slate-500">
+                                    Top. {teacherTotalBlocks}B
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
                             {isMatched ? (
                               <span className="flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white shrink-0 shadow-2xs">
                                 <Check size={11} strokeWidth={3} />
@@ -1926,264 +2125,44 @@ export default function DykPlanner() {
                             )}
                           </div>
 
-                          <div className="flex items-center justify-between text-[11px] w-full pt-1 border-t border-slate-100">
-                            <div className="flex items-center gap-1.5 truncate">
-                              <span className="font-bold text-slate-700 truncate">
-                                {teacher.branch || 'Genel'}
-                              </span>
-                              {isMatched && (
-                                <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded shrink-0">
-                                  {matchedAsg.blocksPerWeek} Blok ({matchedAsg.subject})
-                                </span>
-                              )}
+                          {/* Alt Satır: Öğretmenin Kaç Bloğa Gireceği Seçimi (1 Blok / 2 Blok / 3 Blok) */}
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="pt-2 border-t border-slate-200/70 flex items-center justify-between gap-1"
+                          >
+                            <span className="text-[10px] font-bold text-slate-500 shrink-0">
+                              Blok Sayısı:
+                            </span>
+                            <div className="grid grid-cols-3 gap-1 flex-1 max-w-[165px]">
+                              {[1, 2, 3].map(b => {
+                                const isActiveBlock = isMatched && matchedBlocks === b;
+                                return (
+                                  <button
+                                    key={b}
+                                    type="button"
+                                    onClick={(e) => handleSetTeacherBlockCount(e, teacher, b)}
+                                    className={`py-1 px-1.5 rounded-lg text-[10px] font-black border transition-all cursor-pointer text-center ${
+                                      isActiveBlock
+                                        ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs ring-1 ring-emerald-400'
+                                        : isMatched
+                                          ? 'bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'
+                                    }`}
+                                    title={`"${getGroupName(assignClassId)}" sınıfına ${b} Blok (${b * 2} Saat) olarak ata`}
+                                  >
+                                    {b} Blok
+                                  </button>
+                                );
+                              })}
                             </div>
-                            {lateDays.length > 0 && (
-                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 shrink-0">
-                                ★ Son Ders
-                              </span>
-                            )}
                           </div>
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
                 </div>
 
               </div>
-
-              {/* 3. ALT EŞLEŞTİRME VE TOPLU ONAY KONSOLU */}
-              <div className="pt-4 border-t border-slate-100 bg-slate-50/70 p-4 rounded-2xl border border-slate-200 space-y-3.5">
-                
-                {/* 🌟 TOPLU EŞLEŞTİRME VE ONAY KONSOLU */}
-                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-slate-50 border border-emerald-200/80 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                      <Sparkles size={18} />
-                    </div>
-                    <div>
-                      <div className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-                        <span>Toplu Eşleştirme & Onay Konsolu</span>
-                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
-                          Otomatik
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 font-medium">
-                        Öğretmen kartlarına 1 kez tıklayarak eşleyebilir, aşağıdaki butonlarla tek onayda toplu atama yapabilirsiniz.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    {/* 1. Seçili Sınıfa Branşları Toplu Ekle */}
-                    <button
-                      type="button"
-                      onClick={handleBatchAssignToCurrentClass}
-                      disabled={!assignClassId}
-                      className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-2xs transition-all active:scale-95 cursor-pointer"
-                      title="Seçili sınıfa Matematik, Fen/Sosyal branş öğretmenlerini toplu eşler"
-                    >
-                      <CheckSquare size={14} />
-                      <span>"{getGroupName(assignClassId) || 'Seçili Sınıf'}" Sınıfına Branşları Toplu Ekle</span>
-                    </button>
-
-                    {/* 2. Tüm Sınıflara Hepsini Toplu Ekle ve Onayla */}
-                    <button
-                      type="button"
-                      onClick={handleBatchAssignAllClassesConfirm}
-                      disabled={dykGroups.length === 0}
-                      className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-2xs transition-all active:scale-95 cursor-pointer"
-                      title="Tüm kayıtlı DYK sınıflarına branşlarına uygun öğretmenleri tek onay ile atar"
-                    >
-                      <Layers size={14} />
-                      <span>🚀 Tüm Sınıflara Hepsini Toplu Ekle ve Onayla</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Eşleştirme Görsel Bağlantı İndikatörü */}
-                <div className="flex flex-wrap items-center justify-center gap-3 py-1">
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-900 shadow-2xs">
-                    <GraduationCap size={15} className="text-emerald-600" />
-                    <span>{getGroupName(assignClassId) || 'Sınıf Seçiniz'}</span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 text-emerald-600 font-extrabold text-xs bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200/60 animate-pulse">
-                    <ArrowRightLeft size={14} />
-                    <span>Eşleştirme Modu (1 Tıkla Eşle / Kaldır)</span>
-                  </div>
-
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-900 shadow-2xs">
-                    <Users size={15} className="text-emerald-600" />
-                    <span>{getTeacherName(assignTeacherId) || 'Öğretmen Seçiniz'}</span>
-                  </div>
-                </div>
-
-                {/* Ders ve Blok Parametreleri */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1 uppercase tracking-wider">
-                      Kurs Dersi
-                    </label>
-                    <input
-                      type="text"
-                      value={assignSubject}
-                      onChange={(e) => setAssignSubject(e.target.value)}
-                      placeholder="Örn: Matematik"
-                      list="dyk-subjects-list"
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                      required
-                    />
-                    <datalist id="dyk-subjects-list">
-                      {DYK_COMMON_SUBJECTS.map(s => (
-                        <option key={s} value={s} />
-                      ))}
-                    </datalist>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1 uppercase tracking-wider">
-                      Haftalık Blok Yükü
-                    </label>
-                    <select
-                      value={assignBlocks}
-                      onChange={(e) => setAssignBlocks(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 cursor-pointer"
-                    >
-                      <option value="1">1 Blok (Haftada 2 Ders Saati)</option>
-                      <option value="2">2 Blok (Haftada 4 Ders Saati)</option>
-                      <option value="3">3 Blok (Haftada 6 Ders Saati)</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-end">
-                    <button
-                      type="button"
-                      onClick={handleAddAssignment}
-                      disabled={!assignClassId || !assignTeacherId || !assignSubject.trim()}
-                      className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-xs transition-all active:scale-95 cursor-pointer h-[37px]"
-                    >
-                      <Plus size={15} />
-                      <span>Eşleştirmeyi Kaydet & Atamayı Ekle</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Hızlı Ders Butonları */}
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/50">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[10px] font-bold text-slate-400 mr-1">Ders Kısayolları:</span>
-                    {DYK_COMMON_SUBJECTS.map(subj => (
-                      <button
-                        key={subj}
-                        type="button"
-                        onClick={() => setAssignSubject(subj)}
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-all cursor-pointer ${
-                          assignSubject === subj
-                            ? 'bg-emerald-600 text-white border-emerald-700'
-                            : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-200'
-                        }`}
-                      >
-                        {subj}
-                      </button>
-                    ))}
-                  </div>
-
-                  <span className="text-[10px] text-slate-400 font-medium italic">
-                    💡 İpucu: Öğretmen kartına 1 kez tıklayarak eşleyebilir, tekrar tıklayarak eşleştirmeyi kaldırabilirsiniz.
-                  </span>
-                </div>
-
-              </div>
-            </div>
-
-            {/* Atamalar Tablosu */}
-            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xs space-y-0">
-              
-              <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
-                <div className="flex items-center gap-3">
-                  <h3 className="text-sm font-extrabold text-slate-900">
-                    Kayıtlı DYK Atamaları ({filteredAssignments.length})
-                  </h3>
-                  <span className="text-xs font-bold text-slate-500">
-                    Toplam {filteredAssignments.reduce((acc, a) => acc + (Number(a.blocksPerWeek) || 1), 0)} Blok
-                  </span>
-                </div>
-
-                {/* Sınıf Filtresi */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-500">Sınıf Filtresi:</span>
-                  <select
-                    value={assignmentFilterClass}
-                    onChange={(e) => setAssignmentFilterClass(e.target.value)}
-                    className="bg-white border border-slate-200 text-slate-900 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 cursor-pointer shadow-2xs"
-                  >
-                    <option value="ALL">Tüm Sınıflar</option>
-                    {dykGroups.map(g => (
-                      <option key={g.id} value={g.id}>{g.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {filteredAssignments.length === 0 ? (
-                <div className="p-10 text-center text-slate-400 text-xs">
-                  Henüz tanımlanmış bir ders ataması bulunmuyor. Yukarıdaki formu kullanarak atama ekleyin.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
-                        <th className="p-3.5">DYK Sınıfı</th>
-                        <th className="p-3.5">Kurs Dersi</th>
-                        <th className="p-3.5">Öğretmen</th>
-                        <th className="p-3.5 text-center">Haftalık Yük</th>
-                        <th className="p-3.5 text-center">İşlem</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {filteredAssignments.map(asg => {
-                        const t = teachers.find(tch => tch.id === asg.teacherId);
-                        const analysis = teacherSchoolAnalysis[asg.teacherId] || {};
-                        const lateDays = Object.keys(analysis).filter(d => analysis[d]?.hasLatePeriod);
-
-                        return (
-                          <tr key={asg.id} className="hover:bg-slate-50/70 transition-colors">
-                            <td className="p-3.5 font-bold text-slate-900">{getGroupName(asg.groupId)}</td>
-                            <td className="p-3.5 font-extrabold text-emerald-700">{asg.subject}</td>
-                            <td className="p-3.5">
-                              <div className="font-semibold text-slate-800">{getTeacherName(asg.teacherId)}</div>
-                              {lateDays.length > 0 && (
-                                <div className="text-[10px] text-emerald-700 font-medium">
-                                  ★ Son Ders: {lateDays.join(', ')}
-                                </div>
-                              )}
-                            </td>
-                            <td className="p-3.5 text-center">
-                              <span className="px-2.5 py-1 rounded-full bg-slate-100 font-bold text-slate-800 border border-slate-200">
-                                {asg.blocksPerWeek} Blok ({asg.blocksPerWeek * 2} Ders Saati)
-                              </span>
-                            </td>
-                            <td className="p-3.5 text-center">
-                              <button
-                                onClick={() => {
-                                  deleteDykAssignment(asg.id);
-                                  showToast("Atama silindi.");
-                                }}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                title="Atamayı Sil"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
             </div>
 
             {/* İleri Adım Butonu */}

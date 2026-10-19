@@ -1,16 +1,18 @@
-# React + Vite
+# Okul Yönetim ve Planlama Platformu — Frontend (`React + Vite + Tailwind CSS`)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Bu dizin, uygulamanın **Haftalık Ders Programı**, **Okul Ortak Sınav Takvimi (`ExamPlanner.jsx` & `examEngine.js`)**, **Kelebek Karma Sınav Sistemi (`KelebekPlanner.jsx`)** ve **DYK Planlayıcı (`DykPlanner.jsx`)** modüllerini barındıran React istemci uygulamasıdır.
 
-Currently, two official plugins are available:
+Detaylı mimari ve modül dokümantasyonu için ana dizindeki [`README.md`](../README.md) ve [`DESIGN.md`](../DESIGN.md) dosyalarına bakabilirsiniz.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Geliştirme ve Derleme Komutları
 
-## React Compiler
+```bash
+# Bağımlılıkları yükle
+npm install
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+# Geliştirme sunucusunu başlat (http://localhost:5173)
+npm run dev
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+# Üretim (Production) derlemesi oluştur
+npm run build
+```

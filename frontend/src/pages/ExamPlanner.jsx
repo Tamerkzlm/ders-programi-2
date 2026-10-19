@@ -28,10 +28,19 @@ import {
   X,
   Users,
   GraduationCap,
-  Filter
+  Filter,
+  Move
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
-import { getWorkingDaysBetween, formatExamDay, DEFAULT_EXAM_SUBJECTS } from '../utils/examEngine';
+import {
+  getWorkingDaysBetween,
+  formatExamDay,
+  DEFAULT_EXAM_SUBJECTS,
+  buildPlacementsFromSchedule,
+  checkBranchAvailabilityOnDay,
+  getSubjectBranchTeachers,
+  normalizeTr
+} from '../utils/examEngine';
 import { getSubjectSoftColor } from '../utils/courseColors';
 
 // MEB Ortaöğretim yaygın ders kısaltmaları ve tam isim haritası
@@ -128,22 +137,27 @@ export default function ExamPlanner() {
   const navigate = useNavigate();
   const {
     settings,
+    teachers,
     classrooms,
+    timetable,
     examSettings,
     examSubjectsByGrade,
     examSchedule,
+    examPlacements,
     examResult,
     updateExamSettings,
     setExamSubjectsByGrade,
     toggleExamSubjectMajor,
+    updateExamSubjectMebConfig,
     addExamSubject,
     deleteExamSubject,
     generateExamSchedule,
+    setExamPlacements,
     clearExamSchedule
   } = useAppStore();
 
   // 3 Dikey Menü Sekmesi: 'settings' | 'subjects' | 'distribution'
-  const [activeMenu, setActiveMenu] = useState(examSchedule ? 'distribution' : 'settings');
+  const [activeMenu, setActiveMenu] = useState((examSchedule || (examPlacements && examPlacements.length > 0)) ? 'distribution' : 'settings');
   const [selectedGrade, setSelectedGrade] = useState('9');
   const [viewMode, setViewMode] = useState('matrix'); // 'matrix' | 'single'
   const [toastMessage, setToastMessage] = useState('');
@@ -164,16 +178,23 @@ export default function ExamPlanner() {
   const ALL_POSSIBLE_GRADES = ["9", "10", "11-SAY", "11-EA", "12"];
   const grades = examSettings?.grades || ALL_POSSIBLE_GRADES;
   const examSlots = examSettings?.examSlots || [3, 5];
+  const sortedExamSlots = useMemo(() => [...examSlots].sort((a, b) => a - b), [examSlots]);
 
   // 1. Menü: Tarih Aralığı Günleri (Varsayılan iş günleri)
   const allRangeDays = useMemo(() => {
-    return getWorkingDaysBetween(examSettings?.startDate || "2025-11-03", examSettings?.endDate || "2025-11-14");
+    return getWorkingDaysBetween(examSettings?.startDate || "2026-11-02", examSettings?.endDate || "2026-11-13");
   }, [examSettings?.startDate, examSettings?.endDate]);
 
-  // Kullanıcının interaktif olarak seçtiği günler
+  // Kullanıcının interaktif olarak seçtiği günler (Sadece mevcut tarih aralığındaki geçerli günleri baz alır)
   const selectedDatesList = useMemo(() => {
+    const rangeSet = new Set(allRangeDays.map(d => d.date));
     if (examSettings?.selectedDates && Array.isArray(examSettings.selectedDates)) {
-      return examSettings.selectedDates;
+      const validInRange = examSettings.selectedDates.filter(d => rangeSet.has(d));
+      // Eğer kayıtlı tarihler eski bir yıldan/aralıktan kalmışsa ve mevcut aralıkla hiç eşleşmiyorsa (ancak dizi boş değilse), mevcut aralığın tüm günlerini seçili yap
+      if (examSettings.selectedDates.length > 0 && validInRange.length === 0) {
+        return allRangeDays.map(d => d.date);
+      }
+      return validInRange;
     }
     return allRangeDays.map(d => d.date);
   }, [examSettings?.selectedDates, allRangeDays]);
@@ -186,28 +207,194 @@ export default function ExamPlanner() {
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [selectedDatesList]);
 
-  // 11. Sınıf Otomatik Geçiş ve Senkronizasyon (Varsa eski "11"i 11-SAY ve 11-EA'ya yükselt)
+  // Sadece sınav yapılacak seçili tarihler (Tatiller ve hafta sonları hariç - sütun genişliğini artırmak için)
+  const allSelectedRangeDates = useMemo(() => {
+    return workingDays.map(d => d.date);
+  }, [workingDays]);
+
+  const halfLength = Math.ceil(allSelectedRangeDates.length / 2);
+  const firstRowDates = allSelectedRangeDates.slice(0, halfLength);
+  const secondRowDates = allSelectedRangeDates.slice(halfLength);
+
+  // 🛡️ Her ders için Zümre Öğretmenleri ve Seçili Günlerdeki Uygunluk Özeti (Memoized)
+  const subjectBranchSummaryMap = useMemo(() => {
+    const map = new Map();
+    const periodsPerDay = settings?.periodsPerDay || 8;
+    const uniqueWeekdays = Array.from(new Set(workingDays.map(d => d.dayName).filter(Boolean)));
+
+    Object.values(examSubjectsByGrade || {}).forEach(list => {
+      (list || []).forEach(sub => {
+        if (!sub?.name) return;
+        const norm = normalizeTr(sub.name);
+        if (map.has(norm)) return;
+
+        const branchTeachers = getSubjectBranchTeachers(sub.name, sub.code, teachers, classrooms);
+        const openDays = [];
+        const closedDays = [];
+
+        uniqueWeekdays.forEach(dayName => {
+          const check = checkBranchAvailabilityOnDay({
+            subjectName: sub.name,
+            subjectCode: sub.code,
+            dateOrDayName: dayName,
+            teachers,
+            classrooms,
+            timetable,
+            periodsPerDay
+          });
+          if (check.isAvailable) {
+            openDays.push(dayName);
+          } else {
+            closedDays.push(dayName);
+          }
+        });
+
+        map.set(norm, {
+          teacherCount: branchTeachers.length,
+          teacherNames: branchTeachers.map(t => t.name),
+          openDays,
+          closedDays
+        });
+      });
+    });
+
+    return map;
+  }, [examSubjectsByGrade, workingDays, teachers, classrooms, timetable, settings?.periodsPerDay]);
+
+  // sinav-takvimi: Aktif sınav yerleşimleri (Sürükle-bırak destekli kartlar)
+  const activePlacements = useMemo(() => {
+    if (examPlacements && Array.isArray(examPlacements) && examPlacements.length > 0) {
+      return examPlacements;
+    }
+    if (examSchedule) {
+      return buildPlacementsFromSchedule(examSchedule, grades, examSlots);
+    }
+    return [];
+  }, [examPlacements, examSchedule, grades, examSlots]);
+
+  // sinav-takvimi: Sürükle ve Bırak (Drag & Drop) İşleyicileri
+  const handleDragStart = (e, placementId) => {
+    e.dataTransfer.setData("text/plain", placementId);
+  };
+
+  const handleDrop = (e, targetDate, targetSlot) => {
+    e.preventDefault();
+    const placementId = e.dataTransfer.getData("text/plain");
+    if (!placementId) return;
+
+    const draggedPlacement = activePlacements.find(p => p.id === placementId);
+    if (!draggedPlacement) return;
+
+    if (draggedPlacement.date === targetDate && Number(draggedPlacement.slot) === Number(targetSlot)) {
+      return;
+    }
+
+    const targetDayObj = formatExamDay(targetDate);
+    const targetDayName = targetDayObj?.dayName || targetDate;
+
+    // 🛡️ 1. KONTROL: MEB Ortak Sınavı başka bir güne taşınıyorsa koruma uyarısı
+    if (draggedPlacement.isMebExam && draggedPlacement.date !== targetDate) {
+      const confirmMove = window.confirm(
+        `🏛️ "${draggedPlacement.name}" dersi MEB Ortak Sınavı olarak (${draggedPlacement.mebDate || draggedPlacement.date}) tarihine sabitlenmiştir.\n\nYine de ${targetDayObj?.formatted || targetDate} tarihine taşımak istiyor musunuz?`
+      );
+      if (!confirmMove) return;
+    }
+
+    // 🛡️ 2. KONTROL: Okul içi sınav taşınıyorsa hedef günde zümre öğretmeni okulda mı?
+    if (!draggedPlacement.isMebExam) {
+      const branchCheck = checkBranchAvailabilityOnDay({
+        subjectName: draggedPlacement.name,
+        subjectCode: draggedPlacement.code || '',
+        dateOrDayName: targetDayName,
+        teachers,
+        classrooms,
+        timetable,
+        periodsPerDay: settings?.periodsPerDay || 8
+      });
+
+      if (branchCheck.hasTeachers && !branchCheck.isAvailable) {
+        const closedNames = branchCheck.unavailableTeachers.map(t => t.name).join(', ');
+        showToast(
+          `⛔ ${targetDayName} günü "${draggedPlacement.name}" zümresinden hiçbir öğretmen okulda değil (${closedNames})! Bu güne sınav konulamaz.`
+        );
+        return;
+      }
+    }
+
+    const updatedPlacements = activePlacements.map(p =>
+      p.id === placementId ? { ...p, date: targetDate, slot: Number(targetSlot) } : p
+    );
+    setExamPlacements(updatedPlacements);
+    showToast(`"${draggedPlacement.name}" sınavı ${targetDayName} - ${targetSlot}. Derse taşındı.`);
+  };
+
+  // Ders adı normalizasyon yardımcısı (Türkçe karakter duyarlı)
+  const normalizeSubName = (str = '') => str.trim().toLocaleLowerCase('tr-TR');
+
+  // 11. Sınıf Otomatik Geçiş, 2026-2027 Dönem Ön Ayarı ve Tarih Aralığı Senkronizasyonu
   useEffect(() => {
     const currentGrades = examSettings?.grades || [];
     let updatedGrades = [...currentGrades];
-    let needsUpdate = false;
+    const settingsPatch = {};
 
     if (currentGrades.includes("11") && !currentGrades.includes("11-SAY")) {
       updatedGrades = currentGrades.flatMap(g => g === "11" ? ["11-SAY", "11-EA"] : [g]);
-      needsUpdate = true;
+      settingsPatch.grades = updatedGrades;
     }
 
-    if (needsUpdate) {
-      updateExamSettings({ grades: updatedGrades });
+    if (!examSettings?.schoolYear || examSettings.schoolYear === "2025-2026") {
+      settingsPatch.schoolYear = "2026-2027";
     }
 
-    // 11-SAY ve 11-EA ders havuzunu hazırla
-    if (!examSubjectsByGrade?.["11-SAY"] || !examSubjectsByGrade?.["11-EA"]) {
-      setExamSubjectsByGrade({
-        ...examSubjectsByGrade,
-        "11-SAY": examSubjectsByGrade?.["11-SAY"] || DEFAULT_EXAM_SUBJECTS["11-SAY"],
-        "11-EA": examSubjectsByGrade?.["11-EA"] || DEFAULT_EXAM_SUBJECTS["11-EA"]
+    const sDate = examSettings?.startDate === "2025-11-03" ? "2026-11-02" : (examSettings?.startDate || "2026-11-02");
+    const eDate = examSettings?.endDate === "2025-11-14" ? "2026-11-13" : (examSettings?.endDate || "2026-11-13");
+    if (sDate !== examSettings?.startDate) settingsPatch.startDate = sDate;
+    if (eDate !== examSettings?.endDate) settingsPatch.endDate = eDate;
+
+    const rangeDays = getWorkingDaysBetween(sDate, eDate).map(d => d.date);
+    const rangeSet = new Set(rangeDays);
+    const currentSelected = examSettings?.selectedDates || [];
+    const validSelected = currentSelected.filter(d => rangeSet.has(d));
+
+    if (currentSelected.length > 0 && validSelected.length !== currentSelected.length) {
+      settingsPatch.selectedDates = validSelected.length > 0 ? validSelected : rangeDays;
+    }
+
+    if (Object.keys(settingsPatch).length > 0) {
+      updateExamSettings(settingsPatch);
+    }
+
+    // 11-SAY ve 11-EA ders havuzunu hazırla + Bir ders bir sınıfta ana ders ise tüm sınıflarda senkronize et
+    const basePool = {
+      ...examSubjectsByGrade,
+      "11-SAY": examSubjectsByGrade?.["11-SAY"] || DEFAULT_EXAM_SUBJECTS["11-SAY"],
+      "11-EA": examSubjectsByGrade?.["11-EA"] || DEFAULT_EXAM_SUBJECTS["11-EA"]
+    };
+
+    const canonicalMajorByNorm = new Map();
+    const gradeOrder = ["9", "10", "11-SAY", "11-EA", "12", ...Object.keys(basePool)];
+    gradeOrder.forEach(g => {
+      (basePool[g] || []).forEach(s => {
+        const norm = normalizeSubName(s.name);
+        if (norm && !canonicalMajorByNorm.has(norm)) {
+          canonicalMajorByNorm.set(norm, !!s.isMajor);
+        }
       });
+    });
+
+    let poolChanged = !examSubjectsByGrade?.["11-SAY"] || !examSubjectsByGrade?.["11-EA"];
+    const syncedPool = {};
+    Object.entries(basePool).forEach(([g, list]) => {
+      syncedPool[g] = (list || []).map(s => {
+        const norm = normalizeSubName(s.name);
+        const targetMajor = canonicalMajorByNorm.has(norm) ? canonicalMajorByNorm.get(norm) : !!s.isMajor;
+        if (!!s.isMajor !== targetMajor) poolChanged = true;
+        return { ...s, isMajor: targetMajor };
+      });
+    });
+
+    if (poolChanged) {
+      setExamSubjectsByGrade(syncedPool);
     }
   }, []);
 
@@ -362,49 +549,18 @@ export default function ExamPlanner() {
     updateExamSettings({ examSlots: updated });
   };
 
-  // 2. Menü: Dersin uygulanacağı şubeleri toggle etme
-  const handleToggleSubjectSection = (grade, subjectId, sectionName) => {
-    const currentList = examSubjectsByGrade[grade] || [];
-    const gradeSections = getGradeSections(grade, classrooms).map(c => c.name);
-
-    const updated = currentList.map(s => {
-      if (s.id === subjectId) {
-        const sections = s.appliedSections !== undefined ? s.appliedSections : [...gradeSections];
-        let newSections;
-        if (sections.includes(sectionName)) {
-          newSections = sections.filter(sec => sec !== sectionName);
-        } else {
-          newSections = [...sections, sectionName];
-        }
-        return { ...s, appliedSections: newSections };
-      }
-      return s;
-    });
-
-    setExamSubjectsByGrade({
-      ...examSubjectsByGrade,
-      [grade]: updated
-    });
+  // 2. Menü: Ana Ders Yap / Çıkar (Tüm sınıflarda senkronize)
+  const handleToggleMajor = (grade, sub) => {
+    const nextState = !sub.isMajor;
+    toggleExamSubjectMajor(grade, sub.id);
+    if (nextState) {
+      showToast(`⭐ "${sub.name}" dersi tüm sınıflarda Ana Ders olarak işaretlendi.`);
+    } else {
+      showToast(`"${sub.name}" dersi tüm sınıflarda ana derslikten çıkarıldı.`);
+    }
   };
 
-  // 2. Menü: Tüm şubeleri seç / sıfırla
-  const handleToggleAllSections = (grade, subjectId) => {
-    const gradeSections = getGradeSections(grade, classrooms).map(c => c.name);
-    const currentList = examSubjectsByGrade[grade] || [];
-    const updated = currentList.map(s => {
-      if (s.id === subjectId) {
-        const isAllSelected = s.appliedSections && s.appliedSections.length === gradeSections.length;
-        return { ...s, appliedSections: isAllSelected ? [] : [...gradeSections] };
-      }
-      return s;
-    });
-    setExamSubjectsByGrade({
-      ...examSubjectsByGrade,
-      [grade]: updated
-    });
-  };
-
-  // 2. Menü: Ders programı modülünden otomatik çekme (Şubeler ve 11-SAY/EA ayrımıyla)
+  // 2. Menü: Ders programı modülünden otomatik çekme (11-SAY/EA ayrımı ve ortak Ana Ders senkronizasyonuyla)
   const handleAutoImportFromTimetable = () => {
     if (!classrooms || classrooms.length === 0) {
       showToast('Ders programında tanımlı sınıf veya ders bulunamadı.');
@@ -437,29 +593,16 @@ export default function ExamPlanner() {
 
         const fullName = SUBJECT_FULL_NAMES[rawSubject] || SUBJECT_FULL_NAMES[upper] || rawSubject;
         
-        let isMajor = false;
-        if (targetGrade === '11-SAY') {
-          isMajor = /MAT|GEOM|FİZ|FIZ|KİM|KMY|BİY|EDEB|TDEB/i.test(rawSubject) || /Matematik|Fizik|Kimya|Biyoloji|Edebiyat/i.test(fullName);
-        } else if (targetGrade === '11-EA') {
-          isMajor = /MAT|GEOM|EDEB|TDEB|TARİH|TAR|COG|COĞRFY|COGRFY/i.test(rawSubject) || /Matematik|Edebiyat|Tarih|Coğrafya/i.test(fullName);
-        } else {
-          isMajor = /EDEB|TDEB|MAT|FİZ|FIZ|KİM|KMY|BİY/i.test(rawSubject) || /EDEB|TDEB|MAT|FİZ|FIZ|KİM|KMY|BİY/i.test(fullName);
-        }
+        // Bir ders bir sınıfta ana ders ise tüm sınıflarda ana ders olmalı
+        const isMajor = /EDEB|TDEB|MAT|GEOM|FİZ|FIZ|KİM|KMY|BİY/i.test(rawSubject) || /Matematik|Fizik|Kimya|Biyoloji|Edebiyat/i.test(fullName);
 
         if (!byGrade[targetGrade].has(fullName)) {
           byGrade[targetGrade].set(fullName, {
             id: `es_${targetGrade}_${fullName.replace(/[^a-zA-Z0-9]/g, '_')}_${Math.random().toString(36).slice(2, 6)}`,
             name: fullName,
             code: co.code || rawSubject.slice(0, 5).toUpperCase(),
-            isMajor: isMajor,
-            appliedSections: [c.name]
+            isMajor: isMajor
           });
-        } else {
-          // Mevcut derse bu şubeyi de ekle
-          const existing = byGrade[targetGrade].get(fullName);
-          if (c.name && !existing.appliedSections.includes(c.name)) {
-            existing.appliedSections.push(c.name);
-          }
         }
       });
     });
@@ -481,7 +624,7 @@ export default function ExamPlanner() {
     }
 
     const totalImported = Object.values(finalSubjects).reduce((acc, l) => acc + l.length, 0);
-    showToast(`Ders programından ${detectedGrades.length} grupta toplam ${totalImported} sınav dersi ve şubeleri aktarıldı! ✨`);
+    showToast(`Ders programından ${detectedGrades.length} grupta toplam ${totalImported} sınav dersi aktarıldı! ✨`);
   };
 
   // 2. Menü: Varsayılan ders listesine sıfırla
@@ -492,28 +635,99 @@ export default function ExamPlanner() {
     showToast('Tüm kademelerdeki sınav dersleri varsayılan listeye sıfırlandı.');
   };
 
-  // 2. Menü: Manuel ders ekleme
+  // Okuldaki tüm kademelerde tanımlı benzersiz dersler haritası (isim -> { name, code, isMajor })
+  const allSchoolSubjectsMap = useMemo(() => {
+    const map = new Map();
+    Object.values(examSubjectsByGrade || {}).forEach(list => {
+      (list || []).forEach(s => {
+        const norm = normalizeSubName(s.name);
+        if (norm && !map.has(norm)) {
+          map.set(norm, { name: s.name, code: s.code, isMajor: !!s.isMajor });
+        } else if (norm && s.isMajor) {
+          map.get(norm).isMajor = true;
+        }
+      });
+    });
+    return map;
+  }, [examSubjectsByGrade]);
+
+  // Seçili kademedeki dersler ve dinamik arama eşleşmeleri
+  const currentGradeSubjects = useMemo(() => {
+    return examSubjectsByGrade[selectedGrade] || [];
+  }, [examSubjectsByGrade, selectedGrade]);
+
+  const searchNorm = normalizeSubName(newSubName);
+
+  // Seçili kademede yazılan isimle birebir aynı olan ders var mı?
+  const exactDuplicateSubject = useMemo(() => {
+    if (!searchNorm) return null;
+    return currentGradeSubjects.find(s => normalizeSubName(s.name) === searchNorm) || null;
+  }, [currentGradeSubjects, searchNorm]);
+
+  // Seçili kademede yazılan metni içeren mevcut dersler (Dinamik arama gibi filtreleme için)
+  const filteredGradeSubjects = useMemo(() => {
+    if (!searchNorm) return currentGradeSubjects;
+    return currentGradeSubjects.filter(s =>
+      normalizeSubName(s.name).includes(searchNorm) ||
+      normalizeSubName(s.code || '').includes(searchNorm)
+    );
+  }, [currentGradeSubjects, searchNorm]);
+
+  // Diğer kademelerde olup bu kademede henüz ekli olmayan ve aramayla eşleşen ders önerileri
+  const otherGradeSuggestions = useMemo(() => {
+    if (!searchNorm) return [];
+    const currentNorms = new Set(currentGradeSubjects.map(s => normalizeSubName(s.name)));
+    const suggestions = [];
+    allSchoolSubjectsMap.forEach((val, norm) => {
+      if (!currentNorms.has(norm) && norm.includes(searchNorm)) {
+        suggestions.push(val);
+      }
+    });
+    return suggestions;
+  }, [allSchoolSubjectsMap, currentGradeSubjects, searchNorm]);
+
+  // Ders adı yazılırken diğer sınıflarda kayıtlı bir dersle eşleşirse Ana Ders durumunu otomatik senkronize et
+  const handleSubjectNameInputChange = (val) => {
+    setNewSubName(val);
+    setNewSubGrade(selectedGrade);
+    const norm = normalizeSubName(val);
+    if (norm && allSchoolSubjectsMap.has(norm)) {
+      setNewSubIsMajor(!!allSchoolSubjectsMap.get(norm).isMajor);
+    }
+  };
+
+  // 2. Menü: Manuel ders ekleme (Tekrar ekleme uyarısı + tüm sınıflarda ana ders senkronizasyonu)
   const handleAddSubject = (e) => {
     e.preventDefault();
-    if (!newSubName.trim()) return;
-    const code = newSubCode.trim() || newSubName.trim().slice(0, 5).toUpperCase();
-    
-    // Eğer şube seçilmediyse o kademenin tüm şubelerini varsayılan yap
-    const gradeSections = getGradeSections(newSubGrade, classrooms).map(c => c.name);
-    const sectionsToApply = newSubSelectedSections.length > 0 ? newSubSelectedSections : gradeSections;
+    const trimmedName = newSubName.trim();
+    if (!trimmedName) return;
 
-    addExamSubject(newSubGrade, {
-      name: newSubName.trim(),
+    const targetGrade = selectedGrade;
+    const norm = normalizeSubName(trimmedName);
+    const existingInGrade = (examSubjectsByGrade[targetGrade] || []).find(
+      s => normalizeSubName(s.name) === norm
+    );
+
+    if (existingInGrade) {
+      showToast(`⚠️ "${existingInGrade.name}" dersi ${getGradeTitle(targetGrade)} kademesinde zaten ekli!`);
+      return;
+    }
+
+    // Eğer bu ders başka bir sınıfta varsa onun Ana Ders durumunu koru veya kullanıcının seçimiyle tüm sınıfları eşitle
+    const existingGlobal = allSchoolSubjectsMap.get(norm);
+    const finalIsMajor = existingGlobal ? (newSubIsMajor || existingGlobal.isMajor) : newSubIsMajor;
+    const code = newSubCode.trim() || existingGlobal?.code || trimmedName.slice(0, 5).toUpperCase();
+
+    addExamSubject(targetGrade, {
+      name: existingGlobal?.name || trimmedName,
       code: code,
-      isMajor: newSubIsMajor,
-      appliedSections: sectionsToApply
+      isMajor: finalIsMajor
     });
     setNewSubName('');
     setNewSubCode('');
     setNewSubIsMajor(false);
     setNewSubSelectedSections([]);
-    setSelectedGrade(newSubGrade);
-    showToast(`"${newSubName.trim()}" dersi ${getGradeTitle(newSubGrade)} kademesine eklendi.`);
+    showToast(`"${existingGlobal?.name || trimmedName}" dersi ${getGradeTitle(targetGrade)} kademesine eklendi.`);
   };
 
   // 3. Menü: Dağıtımı başlat
@@ -527,41 +741,6 @@ export default function ExamPlanner() {
     }
   };
 
-  // 3. Menü: Excel / CSV İndir (Günler Sütunda, Seanslar & Kademeler Satırda)
-  const handleExportCSV = () => {
-    if (!examSchedule) {
-      showToast('Henüz dağıtılmış sınav takvimi bulunmuyor.');
-      return;
-    }
-    const headers = ['Sınav Seansı', 'Sınıf Kademesi', ...workingDays.map(d => `${d.dayName} (${d.date})`)];
-    const rows = [];
-
-    examSlots.forEach((slot, si) => {
-      grades.forEach(g => {
-        const row = [
-          `${si + 1}. Seans (${slot}. Ders)`,
-          getGradeTitle(g)
-        ];
-        workingDays.forEach(day => {
-          const sub = examSchedule?.[g]?.[day.date]?.[slot];
-          row.push(sub ? sub.name : '-');
-        });
-        rows.push(row);
-      });
-    });
-
-    const csvContent = '\uFEFF' + [headers, ...rows].map(e => e.map(cell => `"${(cell || '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `Ortak_Sinav_Takvimi_${examSettings.startDate}_${examSettings.endDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showToast('Sınav takvimi Excel (CSV) formatında indirildi.');
-  };
-
   // İlk seans (günün ilk sınavı)
   const firstSlot = [...examSlots].sort((a, b) => a - b)[0] || 2;
 
@@ -570,66 +749,53 @@ export default function ExamPlanner() {
     return getGradeSections(selectedGrade, classrooms);
   }, [selectedGrade, classrooms]);
 
+  // A4 tek sayfaya sığdırma için dinamik yazı boyutu ve hücre dolgusu (gün ve satır sayısına göre)
+  const printFontSizePx = workingDays.length > 11 ? 6.5 : workingDays.length > 8 ? 7.5 : 8.5;
+  const totalPrintRows = examSlots.length * grades.length;
+  const printCellPadY = totalPrintRows > 12 ? 2 : 3.5;
+
   return (
-    <div className="min-h-screen bg-slate-50/70 font-sans text-slate-800 flex flex-col pb-16">
+    <div className="min-h-screen print:min-h-0 bg-slate-50/70 print:bg-white font-sans text-slate-800 flex flex-col pb-16 print:pb-0">
       
-      {/* 🖨️ YAZDIRMA (PRINT) ÖZEL CSS: A4 YATAY TEK SAYFAYA SIĞDIRMA */}
+      {/* 🖨️ YAZDIRMA (PRINT / PDF) ÖZEL CSS: sinav-takvimi TEK SAYFA A4 YATAY KART DÜZENİ */}
       <style>{`
-        @page {
-          size: A4 landscape;
-          margin: 6mm 6mm 6mm 6mm;
-        }
         @media print {
+          @page {
+            size: A4 landscape;
+            margin: 5mm !important;
+          }
           html, body {
             width: 100% !important;
-            height: 100% !important;
+            height: auto !important;
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-            overflow: hidden !important;
           }
           header, aside, .print-hide, .print\\:hidden {
             display: none !important;
           }
-          main {
+          main, main > div, main > div > div {
             padding: 0 !important;
             margin: 0 !important;
             max-width: none !important;
             width: 100% !important;
+            gap: 0 !important;
           }
-          .print-page-fit {
-            width: 100% !important;
-            max-height: 98vh !important;
-            height: auto !important;
-            page-break-inside: avoid !important;
-            page-break-after: avoid !important;
-            page-break-before: avoid !important;
-            box-shadow: none !important;
-            border: 1.5px solid #000 !important;
-            margin: 0 !important;
-            padding: 0 !important;
+          .print-area {
             display: flex !important;
             flex-direction: column !important;
-            justify-content: space-between !important;
-          }
-          .print-matrix-table {
             width: 100% !important;
-            table-layout: fixed !important;
-            border-collapse: collapse !important;
-          }
-          .print-matrix-table th, .print-matrix-table td {
-            border: 1px solid #111 !important;
-            padding: 3px 2px !important;
-            font-size: 8.5px !important;
-            line-height: 1.15 !important;
-            text-align: center !important;
-          }
-          .print-matrix-table th {
-            background-color: #f1f5f9 !important;
-            font-weight: 800 !important;
-            color: #000 !important;
+            min-height: 94vh !important;
+            height: auto !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
           }
         }
       `}</style>
@@ -836,82 +1002,122 @@ export default function ExamPlanner() {
             {/* 1. DİKEY MENÜ İÇERİĞİ: TARİH & SEANS YAPILANDIRILMASI */}
             {/* ------------------------------------------------------- */}
             {activeMenu === 'settings' && (
-              <div className="space-y-6 animate-in fade-in duration-200">
-                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-6">
+              <div className="space-y-4 animate-in fade-in duration-200">
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-4">
                   
                   {/* Başlık */}
-                  <div className="border-b border-slate-100 pb-4">
-                    <div className="flex items-center gap-2 text-amber-700 font-black text-xs uppercase tracking-wider mb-1">
-                      <Sliders size={14} />
-                      <span>1. Adım: Yapılandırma</span>
+                  <div className="border-b border-slate-100 pb-2.5 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5 text-amber-700 font-black text-[10px] uppercase tracking-wider">
+                        <Sliders size={12} />
+                        <span>1. Adım: Yapılandırma</span>
+                      </div>
+                      <h2 className="text-sm font-extrabold text-slate-900">
+                        Ortak Sınav Tarihi &amp; Seans Yapılandırması
+                      </h2>
                     </div>
-                    <h2 className="text-lg font-extrabold text-slate-900">
-                      Ortak Sınav Tarihi & Seans Yapılandırması
-                    </h2>
                   </div>
 
-                  {/* 1. İNTERAKTİF GÜN SEÇİM TAKVİMİ (KULLANICI TALEBİ) */}
-                  <div className="space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  {/* 1. İNTERAKTİF GÜN SEÇİM TAKVİMİ */}
+                  <div className="space-y-2.5">
+                    {/* Dönem ve Tarih Aralığı Tek Satır Kompakt Bar */}
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl">
                       <div>
-                        <label className="block text-xs font-black text-slate-800 uppercase tracking-wider">
-                          Sınav Yapılacak Günler (Takvimden Doğrudan Seçin)
-                        </label>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          Tarih aralığı belirleyin ve günlere tıklayarak tatilleri / özel günleri hariç tutun.
-                        </p>
+                        <span className="block text-[10px] font-bold text-slate-500 mb-0.5">Eğitim-Öğretim Yılı</span>
+                        <input
+                          type="text"
+                          value={examSettings.schoolYear || '2026-2027'}
+                          onChange={(e) => updateExamSettings({ schoolYear: e.target.value })}
+                          placeholder="2026-2027"
+                          className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-900 font-bold outline-none focus:ring-2 focus:ring-amber-500/20"
+                        />
                       </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={handleSelectAllWeekdays}
-                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold cursor-pointer transition-colors"
-                        >
-                          Tüm Hafta İçi
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleClearAllDays}
-                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold cursor-pointer transition-colors"
-                        >
-                          Temizle
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Başlangıç ve Bitiş Seçicisi */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
                       <div>
-                        <span className="block text-[11px] font-bold text-slate-500 mb-1">Aralık Başlangıç</span>
+                        <span className="block text-[10px] font-bold text-slate-500 mb-0.5">Dönem</span>
+                        <select
+                          value={examSettings.semester || '1'}
+                          onChange={(e) => updateExamSettings({ semester: e.target.value })}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] text-slate-900 font-bold outline-none focus:ring-2 focus:ring-amber-500/20"
+                        >
+                          <option value="1">1. Dönem</option>
+                          <option value="2">2. Dönem</option>
+                        </select>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-500 mb-0.5">Sınav No</span>
+                        <select
+                          value={examSettings.examNo || '1'}
+                          onChange={(e) => updateExamSettings({ examNo: e.target.value })}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] text-slate-900 font-bold outline-none focus:ring-2 focus:ring-amber-500/20"
+                        >
+                          <option value="1">1. Ortak Sınavlar</option>
+                          <option value="2">2. Ortak Sınavlar</option>
+                        </select>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-500 mb-0.5">Aralık Başlangıç</span>
                         <input
                           type="date"
                           value={examSettings.startDate}
-                          onChange={(e) => updateExamSettings({ startDate: e.target.value })}
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 font-bold outline-none focus:ring-2 focus:ring-amber-500/20"
+                          onChange={(e) => {
+                            const newStart = e.target.value;
+                            const newDays = getWorkingDaysBetween(newStart, examSettings.endDate).map(d => d.date);
+                            updateExamSettings({ startDate: newStart, selectedDates: newDays });
+                          }}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] text-slate-900 font-bold outline-none focus:ring-2 focus:ring-amber-500/20"
                         />
                       </div>
                       <div>
-                        <span className="block text-[11px] font-bold text-slate-500 mb-1">Aralık Bitiş</span>
+                        <span className="block text-[10px] font-bold text-slate-500 mb-0.5">Aralık Bitiş</span>
                         <input
                           type="date"
                           value={examSettings.endDate}
-                          onChange={(e) => updateExamSettings({ endDate: e.target.value })}
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 font-bold outline-none focus:ring-2 focus:ring-amber-500/20"
+                          onChange={(e) => {
+                            const newEnd = e.target.value;
+                            const newDays = getWorkingDaysBetween(examSettings.startDate, newEnd).map(d => d.date);
+                            updateExamSettings({ endDate: newEnd, selectedDates: newDays });
+                          }}
+                          className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] text-slate-900 font-bold outline-none focus:ring-2 focus:ring-amber-500/20"
                         />
                       </div>
                     </div>
 
-                    {/* İnteraktif Gün Kartları Grid'i */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-600">
-                        <span>Aralıktaki Günler (Tıklayarak Açıp Kapatın):</span>
-                        <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 font-black">
-                          {workingDays.length} Gün Seçili
-                        </span>
+                    {/* İnteraktif Gün Kartları Grid'i (Kompakt) */}
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-600">
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <span className="text-slate-800 font-extrabold">Aralıktaki Günler:</span>
+                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-extrabold">
+                            <span className="w-2 h-2 rounded-full bg-emerald-600 inline-block"></span>
+                            Aktif Gün
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[10px] text-slate-500 font-bold">
+                            <span className="w-2 h-2 rounded-full bg-slate-300 inline-block"></span>
+                            Kapalı (Tatil)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={handleSelectAllWeekdays}
+                            className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer transition-colors"
+                          >
+                            Tüm Hafta İçi
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleClearAllDays}
+                            className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer transition-colors"
+                          >
+                            Temizle
+                          </button>
+                          <span className="text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 font-black text-[10px]">
+                            {workingDays.length} Gün Seçili
+                          </span>
+                        </div>
                       </div>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 max-h-60 overflow-y-auto pr-1 scrollbar-thin">
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
                         {allRangeDays.map(d => {
                           const isSelected = selectedDatesList.includes(d.date);
 
@@ -920,27 +1126,30 @@ export default function ExamPlanner() {
                               key={d.date}
                               type="button"
                               onClick={() => handleToggleDay(d.date)}
-                              className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                              className={`py-1.5 px-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-1.5 ${
                                 isSelected
-                                  ? 'bg-amber-50/90 border-2 border-amber-500 shadow-2xs ring-2 ring-amber-500/20 text-slate-900'
-                                  : 'bg-slate-50/80 border-slate-200 text-slate-400 opacity-60 hover:opacity-90'
+                                  ? 'bg-emerald-600 border-emerald-700 text-white shadow-2xs hover:bg-emerald-700'
+                                  : 'bg-slate-200 border-slate-300 text-slate-500 hover:bg-slate-300/80'
                               }`}
                             >
-                              <div className="flex items-center justify-between w-full">
-                                <span className={`text-[11px] font-mono font-bold ${isSelected ? 'text-amber-900' : 'text-slate-400 line-through'}`}>
+                              <div className="min-w-0">
+                                <div className={`text-[10px] font-mono font-bold leading-tight ${isSelected ? 'text-emerald-100' : 'text-slate-500 line-through'}`}>
                                   {d.date.slice(5)}
+                                </div>
+                                <div className={`font-black text-[11px] leading-tight truncate ${isSelected ? 'text-white' : 'text-slate-500'}`}>
+                                  {d.dayName}
+                                </div>
+                              </div>
+                              {isSelected ? (
+                                <span className="px-1.5 py-0.5 rounded bg-white text-emerald-800 font-extrabold text-[9px] flex items-center gap-0.5 shrink-0">
+                                  <Check size={9} strokeWidth={3} />
+                                  <span>Aktif</span>
                                 </span>
-                                {isSelected ? (
-                                  <span className="w-4 h-4 rounded-full bg-amber-600 text-white flex items-center justify-center text-[10px]">
-                                    <Check size={10} strokeWidth={3} />
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-rose-500 font-bold">Tatil</span>
-                                )}
-                              </div>
-                              <div className={`font-black text-xs ${isSelected ? 'text-slate-900' : 'text-slate-400'}`}>
-                                {d.dayName}
-                              </div>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-300 text-slate-600 text-[9px] font-bold shrink-0">
+                                  Kapalı
+                                </span>
+                              )}
                             </button>
                           );
                         })}
@@ -948,38 +1157,38 @@ export default function ExamPlanner() {
                     </div>
 
                     {/* Ekstra / Özel Gün Ekleme */}
-                    <form onSubmit={handleAddCustomDate} className="flex items-center gap-2 pt-1">
-                      <div className="flex-1 sm:max-w-xs">
+                    <form onSubmit={handleAddCustomDate} className="flex items-center gap-2">
+                      <div className="w-40">
                         <input
                           type="date"
                           value={customDateInput}
                           onChange={(e) => setCustomDateInput(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-[11px] text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
                         />
                       </div>
                       <button
                         type="submit"
                         disabled={!customDateInput}
-                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-40"
                       >
-                        <Plus size={13} />
+                        <Plus size={12} />
                         <span>Özel Gün Ekle</span>
                       </button>
                     </form>
                   </div>
 
-                  {/* 2. Sınav Seansları (Ders Saatleri) */}
-                  <div className="space-y-3 pt-2 border-t border-slate-100">
+                  {/* 2. Sınav Seansları (Ders Saatleri - Tek Satır Kompakt) */}
+                  <div className="space-y-1.5 pt-2.5 border-t border-slate-100">
                     <div className="flex items-center justify-between">
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      <label className="block text-[11px] font-black text-slate-800 uppercase tracking-wider">
                         Günlük Sınav Seansları (Ders Saatleri)
                       </label>
-                      <span className="text-[11px] text-slate-500">
-                        Örn: 2. ve 5. Ders Saatleri
+                      <span className="text-[10px] text-slate-500">
+                        Seçili: {examSlots.join('. ve ')}. Ders
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
                       {[1, 2, 3, 4, 5, 6, 7, 8].map(slot => {
                         const isSelected = examSlots.includes(slot);
                         const isFirst = slot === firstSlot;
@@ -988,18 +1197,18 @@ export default function ExamPlanner() {
                             key={slot}
                             type="button"
                             onClick={() => handleToggleSlot(slot)}
-                            className={`p-3 rounded-2xl text-xs font-bold transition-all cursor-pointer flex flex-col items-center justify-center gap-1 border ${
+                            className={`py-1.5 px-1.5 rounded-xl text-[11px] font-bold transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 border ${
                               isSelected
                                 ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
                                 : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border-slate-200'
                             }`}
                           >
-                            <span className="font-extrabold text-sm">{slot}. Ders Saati</span>
+                            <span className="font-extrabold text-[11px] leading-tight">{slot}. Ders</span>
                             {isSelected && (
-                              <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                              <span className={`text-[9px] px-1 py-0 rounded font-semibold leading-tight ${
                                 isFirst ? 'bg-amber-800 text-white' : 'bg-white/20 text-white'
                               }`}>
-                                {isFirst ? '1. Seans (Ana Ders)' : '2. Seans (Yan Ders)'}
+                                {isFirst ? '1. Seans' : 'Seçili'}
                               </span>
                             )}
                           </button>
@@ -1008,52 +1217,52 @@ export default function ExamPlanner() {
                     </div>
                   </div>
 
-                  {/* 3. SINIF KADEMESİ YÖNETİMİ & YENİ KADEME EKLEME (KULLANICI TALEBİ) */}
-                  <div className="space-y-3 pt-2 border-t border-slate-100">
+                  {/* 3. SINIF KADEMESİ YÖNETİMİ (Kompakt) */}
+                  <div className="space-y-1.5 pt-2.5 border-t border-slate-100">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="block text-xs font-black text-slate-800 uppercase tracking-wider">
-                        Dahil Edilecek Sınıf & Alan Kademeleri
+                      <label className="block text-[11px] font-black text-slate-800 uppercase tracking-wider">
+                        Dahil Edilecek Sınıf &amp; Alan Kademeleri
                       </label>
                       <button
                         type="button"
                         onClick={() => setShowAddGradeInput(!showAddGradeInput)}
-                        className="px-2.5 py-1 rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                        className="px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
                       >
-                        <Plus size={12} />
-                        <span>Sınıf Kademesi Ekle</span>
+                        <Plus size={11} />
+                        <span>Kademe Ekle</span>
                       </button>
                     </div>
 
                     {/* Yeni Kademe Ekleme Formu */}
                     {showAddGradeInput && (
-                      <form onSubmit={handleAddNewGrade} className="p-3 bg-indigo-50/50 border border-indigo-200 rounded-2xl flex items-center gap-2 animate-in fade-in duration-150">
+                      <form onSubmit={handleAddNewGrade} className="p-2 bg-indigo-50/50 border border-indigo-200 rounded-xl flex items-center gap-2 animate-in fade-in duration-150">
                         <input
                           type="text"
-                          placeholder="Kademe Adı (Örn: 11-SÖZ, 12-SAY, 8, Hazırlık)..."
+                          placeholder="Kademe Adı (Örn: 11-SÖZ, 12-SAY, Hazırlık)..."
                           value={newGradeName}
                           onChange={(e) => setNewGradeName(e.target.value)}
-                          className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase"
+                          className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-[11px] text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase"
                           autoFocus
                         />
                         <button
                           type="submit"
-                          className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                          className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                         >
-                          <Check size={13} />
+                          <Check size={12} />
                           <span>Ekle</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => setShowAddGradeInput(false)}
-                          className="p-1.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                          className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
                         >
-                          <X size={15} />
+                          <X size={14} />
                         </button>
                       </form>
                     )}
 
                     {/* Mevcut Kademeler Listesi */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
                       {grades.map(g => {
                         const isSelected = grades.includes(g);
                         const isCustom = !ALL_POSSIBLE_GRADES.includes(g);
@@ -1062,7 +1271,7 @@ export default function ExamPlanner() {
                           <div
                             key={g}
                             onClick={() => handleToggleGrade(g)}
-                            className={`py-3 px-2 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border text-center relative group ${
+                            className={`py-1.5 px-2.5 rounded-xl text-[11px] font-extrabold transition-all cursor-pointer border text-center relative group flex items-center justify-center gap-1.5 ${
                               isSelected
                                 ? (g.includes('11') ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs' : 'bg-amber-600 text-white border-amber-700 shadow-2xs')
                                 : 'bg-slate-50 text-slate-500 hover:bg-slate-100 border-slate-200'
@@ -1075,13 +1284,10 @@ export default function ExamPlanner() {
                                 className="absolute top-1 right-1 p-0.5 rounded-full bg-black/20 hover:bg-black/40 text-white transition-colors cursor-pointer"
                                 title="Kademeyi Sil"
                               >
-                                <X size={10} />
+                                <X size={9} />
                               </button>
                             )}
-                            <div>{getGradeTitle(g)}</div>
-                            {getGradeBadge(g) && (
-                              <div className="text-[9px] font-normal opacity-90 mt-0.5">{getGradeBadge(g)}</div>
-                            )}
+                            <span>{getGradeTitle(g)}</span>
                           </div>
                         );
                       })}
@@ -1089,13 +1295,13 @@ export default function ExamPlanner() {
                   </div>
 
                   {/* Aksiyon Butonları */}
-                  <div className="pt-4 border-t border-slate-100 flex flex-wrap justify-between items-center gap-3">
+                  <div className="pt-2.5 border-t border-slate-100 flex flex-wrap justify-between items-center gap-2">
                     <button
                       type="button"
                       onClick={handleClearSchedule}
-                      className="px-4 py-2.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50/60 hover:bg-rose-100 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                      className="px-3 py-1.5 rounded-xl border border-rose-200 text-rose-700 bg-rose-50/60 hover:bg-rose-100 text-[11px] font-bold transition-colors cursor-pointer flex items-center gap-1.5"
                     >
-                      <RotateCcw size={14} className="text-rose-600" />
+                      <RotateCcw size={13} className="text-rose-600" />
                       <span>Sınav Takvimini Sıfırla</span>
                     </button>
 
@@ -1103,7 +1309,7 @@ export default function ExamPlanner() {
                       <button
                         type="button"
                         onClick={() => showToast('Tarih ve seans ayarları kaydedildi.')}
-                        className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-colors cursor-pointer"
                       >
                         Ayarları Kaydet
                       </button>
@@ -1111,10 +1317,10 @@ export default function ExamPlanner() {
                       <button
                         type="button"
                         onClick={() => setActiveMenu('subjects')}
-                        className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
+                        className="px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1"
                       >
                         <span>2. Adım: Dersleri Belirle</span>
-                        <ChevronRight size={15} />
+                        <ChevronRight size={14} />
                       </button>
                     </div>
                   </div>
@@ -1125,90 +1331,86 @@ export default function ExamPlanner() {
 
             {/* ------------------------------------------------------- */}
             {/* 2. DİKEY MENÜ İÇERİĞİ: OKULDA BULUNAN DERSLER          */}
-            {/* 🌟 KART EŞLEŞTİRME & UYGULANACAK ŞUBE SEÇİMİ          */}
+            {/* 🌟 KOMPAKT YAZI PUNTOLARI & KAYDIRMADAN SIĞAN DERSLER   */}
             {/* ------------------------------------------------------- */}
             {activeMenu === 'subjects' && (
-              <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="space-y-3 animate-in fade-in duration-200">
                 
                 {/* ÜST EYLEM KARTI (OTOMATİK ÇEKME & SIFIRLAMA) */}
-                <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs flex flex-wrap items-center justify-between gap-4">
+                <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="flex items-center gap-2 text-amber-700 font-black text-xs uppercase tracking-wider mb-1">
-                      <BookOpen size={14} />
-                      <span>2. Adım: Ders & Şube Eşleştirme</span>
+                    <div className="flex items-center gap-1.5 text-amber-700 font-black text-[10px] uppercase tracking-wider">
+                      <BookOpen size={12} />
+                      <span>2. Adım: Sınav Dersleri &amp; Ana Ders Seçimi</span>
                     </div>
-                    <h2 className="text-lg font-extrabold text-slate-900">
-                      Sınav Dersleri ve Uygulanacak Şubeler
+                    <h2 className="text-sm font-extrabold text-slate-900">
+                      Sınav Dersleri Yönetimi
                     </h2>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <button
                       type="button"
                       onClick={handleResetToDefaults}
-                      className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1"
                       title="Varsayılan MEB ortak sınav ders listesini yükler"
                     >
-                      <RefreshCw size={14} />
+                      <RefreshCw size={12} />
                       <span>Varsayılanları Yükle</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={handleAutoImportFromTimetable}
-                      className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-2"
+                      className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold shadow-xs transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
                       title="Ders programındaki dersleri otomatik çeker"
                     >
-                      <Sparkles size={15} />
+                      <Sparkles size={13} />
                       <span>Ders Programından Otomatik Aktar</span>
                     </button>
                   </div>
                 </div>
 
                 {/* 2 KOLONLU EŞLEŞTİRME MASASI: SINIF KARTLARI ⇄ DERS KARTLARI */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
 
-                  {/* 1. SOL SÜTUN: SINIF / KADEME KARTLARI (lg:col-span-4) */}
-                  <div className="lg:col-span-4 bg-white border border-slate-200 rounded-3xl p-4 shadow-xs space-y-3">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                      <span className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                        <GraduationCap size={15} className="text-amber-600" />
-                        <span>Sınıf Kademeleri ({grades.length})</span>
+                  {/* 1. SOL SÜTUN: SINIF / KADEME KARTLARI (lg:col-span-3) */}
+                  <div className="lg:col-span-3 bg-white border border-slate-200 rounded-2xl p-3 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                      <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 flex items-center gap-1">
+                        <GraduationCap size={13} className="text-amber-600" />
+                        <span>Kademeler ({grades.length})</span>
                       </span>
                     </div>
 
-                    <div className="space-y-2 max-h-[580px] overflow-y-auto pr-1 scrollbar-thin">
+                    <div className="space-y-1.5">
                       {grades.map(g => {
                         const subjects = examSubjectsByGrade[g] || [];
                         const majorCount = subjects.filter(s => s.isMajor).length;
                         const isSelected = selectedGrade === g;
-                        const sections = getGradeSections(g, classrooms);
 
                         return (
                           <button
                             key={g}
                             type="button"
                             onClick={() => setSelectedGrade(g)}
-                            className={`w-full p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 relative ${
+                            className={`w-full py-2 px-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 relative ${
                               isSelected
-                                ? 'bg-amber-50/90 border-2 border-amber-500 shadow-sm ring-2 ring-amber-500/30'
+                                ? 'bg-amber-50/90 border-2 border-amber-500 shadow-2xs'
                                 : 'bg-slate-50/70 hover:bg-slate-100 border-slate-200'
                             }`}
                           >
                             <div className="flex items-center justify-between w-full">
-                              <span className="font-black text-xs sm:text-sm text-slate-900">
+                              <span className="font-extrabold text-xs text-slate-900">
                                 {getGradeTitle(g)}
                               </span>
-                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700">
+                              <span className="text-[10px] font-bold px-1.5 py-0 rounded-full bg-white border border-slate-200 text-slate-700">
                                 {subjects.length} Ders
                               </span>
                             </div>
 
-                            {/* Şubeler Rozeti */}
-                            <div className="flex items-center justify-between text-[11px] w-full pt-1 border-t border-slate-200/60">
-                              <span className="text-slate-500 font-medium truncate">
-                                Şubeler: {sections.length > 0 ? sections.map(s => s.name).join(', ') : 'Belirtilmedi'}
-                              </span>
+                            <div className="flex items-center justify-between text-[10px] w-full text-slate-500">
+                              <span className="truncate">Ortak sınav</span>
                               <span className="text-amber-800 font-bold shrink-0">
                                 {majorCount} Ana Ders
                               </span>
@@ -1219,171 +1421,312 @@ export default function ExamPlanner() {
                     </div>
                   </div>
 
-                  {/* 2. SAĞ SÜTUN: SEÇİLİ KADEMENİN DERSLERİ & ŞUBE UYGULAMA (lg:col-span-8) */}
-                  <div className="lg:col-span-8 bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                      <div>
-                        <h3 className="font-extrabold text-sm sm:text-base text-slate-900 flex items-center gap-2">
-                          <span>{getGradeTitle(selectedGrade)} Sınav Dersleri</span>
-                          <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
-                            {(examSubjectsByGrade[selectedGrade] || []).length} Ders
-                          </span>
-                        </h3>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          Her dersin uygulanacağı şubeleri seçebilir ve ana ders önceliğini belirleyebilirsiniz.
-                        </p>
-                      </div>
-
-                      {/* Hızlı Yeni Ders Ekleme Açılır Butonu */}
+                  {/* 2. SAĞ SÜTUN: SEÇİLİ KADEMENİN DERSLERİ (lg:col-span-9) */}
+                  <div className="lg:col-span-9 bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-400 font-medium">
-                          {activeGradeSections.length} Şube Mevcut
+                        <h3 className="font-extrabold text-xs sm:text-sm text-slate-900">
+                          {getGradeTitle(selectedGrade)} Sınav Dersleri
+                        </h3>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                          {currentGradeSubjects.length} Ders
                         </span>
                       </div>
+                      <span className="text-[10px] text-slate-500">
+                        Bir ders bir sınıfta <strong>Ana Ders</strong> seçildiğinde tüm sınıflarda otomatik Ana Ders olur.
+                      </span>
                     </div>
 
-                    {/* Hızlı Ders Ekleme Formu */}
-                    <form onSubmit={handleAddSubject} className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                      <div className="text-xs font-black text-slate-800 flex items-center gap-1.5">
-                        <Plus size={14} className="text-amber-600" />
-                        <span>{getGradeTitle(selectedGrade)} Kademesine Yeni Ders Ekle</span>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                        <div className="sm:col-span-6">
+                    {/* Hızlı Ders Ekleme & Dinamik Arama Formu (Kompakt) */}
+                    <form onSubmit={handleAddSubject} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                        <div className="sm:col-span-6 relative">
                           <input
                             type="text"
-                            placeholder="Ders Adı (Örn: Matematik, Fizik)..."
+                            placeholder="Yeni Ders Ekle veya Mevcut Dersi Ara (Örn: Matematik)..."
                             value={newSubName}
-                            onChange={(e) => {
-                              setNewSubName(e.target.value);
-                              setNewSubGrade(selectedGrade);
-                            }}
-                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
-                            required
+                            onChange={(e) => handleSubjectNameInputChange(e.target.value)}
+                            className={`w-full bg-white border rounded-lg px-2.5 py-1.5 text-[11px] text-slate-900 font-bold focus:outline-none focus:ring-2 ${
+                              exactDuplicateSubject
+                                ? 'border-rose-400 focus:ring-rose-500/30 bg-rose-50/30'
+                                : 'border-slate-200 focus:ring-amber-500'
+                            }`}
                           />
                         </div>
 
                         <div className="sm:col-span-3">
-                          <label className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-xl cursor-pointer text-xs font-bold text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={newSubIsMajor}
-                              onChange={(e) => setNewSubIsMajor(e.target.checked)}
-                              className="rounded text-amber-600 focus:ring-0"
-                            />
-                            <span>⭐ Ana Ders</span>
-                          </label>
-                        </div>
-
-                        <div className="sm:col-span-3">
                           <button
-                            type="submit"
-                            className="w-full py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center justify-center gap-1 cursor-pointer shadow-xs"
+                            type="button"
+                            onClick={() => setNewSubIsMajor(!newSubIsMajor)}
+                            className={`w-full h-full px-2.5 py-1.5 rounded-lg border text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                              newSubIsMajor
+                                ? 'bg-amber-500 text-white border-amber-600 shadow-2xs'
+                                : 'bg-white hover:bg-amber-50/60 text-slate-700 border-slate-200'
+                            }`}
                           >
-                            <Plus size={13} />
-                            <span>Dersi Ekle</span>
+                            <Star size={11} className={newSubIsMajor ? 'fill-white text-white' : 'text-amber-500'} />
+                            <span>{newSubIsMajor ? 'Ana Ders (Aktif)' : 'Ana Ders Yap'}</span>
                           </button>
                         </div>
+
+                        <div className="sm:col-span-3 flex items-center gap-1">
+                          <button
+                            type="submit"
+                            className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer shadow-2xs transition-all ${
+                              exactDuplicateSubject
+                                ? 'bg-rose-100 text-rose-700 border border-rose-300 hover:bg-rose-200'
+                                : 'bg-amber-600 hover:bg-amber-700 text-white'
+                            }`}
+                          >
+                            {exactDuplicateSubject ? (
+                              <>
+                                <AlertCircle size={12} />
+                                <span>Zaten Ekli</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus size={12} />
+                                <span>Dersi Ekle</span>
+                              </>
+                            )}
+                          </button>
+                          {newSubName && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewSubName('');
+                                setNewSubIsMajor(false);
+                              }}
+                              className="p-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-600 cursor-pointer"
+                              title="Aramayı Temizle"
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Birebir Tekrar Eden Ders Uyarısı */}
+                      {exactDuplicateSubject && (
+                        <div className="p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-bold flex items-center gap-1.5">
+                          <AlertCircle size={13} className="text-rose-600 shrink-0" />
+                          <span>
+                            <strong>"{exactDuplicateSubject.name}"</strong> dersi {getGradeTitle(selectedGrade)} kademesinde zaten ekli!
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Yazarken Dinamik Eşleşen Ekli Dersler ve Diğer Sınıflardaki Ders Önerileri */}
+                      {searchNorm && !exactDuplicateSubject && (filteredGradeSubjects.length > 0 || otherGradeSuggestions.length > 0) && (
+                        <div className="p-2 rounded-lg bg-white border border-slate-200/90 space-y-1.5 text-[11px]">
+                          {otherGradeSuggestions.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1">
+                              <span className="text-[10px] font-bold text-slate-500">
+                                Diğer sınıflardan hazır seç:
+                              </span>
+                              {otherGradeSuggestions.map(sug => (
+                                <button
+                                  key={sug.name}
+                                  type="button"
+                                  onClick={() => {
+                                    setNewSubName(sug.name);
+                                    setNewSubIsMajor(!!sug.isMajor);
+                                  }}
+                                  className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-amber-100 text-slate-700 hover:text-amber-900 border border-slate-200 font-bold text-[10px] cursor-pointer transition-colors"
+                                >
+                                  + {sug.name} {sug.isMajor ? '(⭐)' : ''}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </form>
 
-                    {/* Sınav Dersleri Kartları Listesi */}
-                    <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1 scrollbar-thin">
-                      {(!examSubjectsByGrade[selectedGrade] || examSubjectsByGrade[selectedGrade].length === 0) ? (
-                        <div className="p-8 text-center text-xs text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                    {/* Sınav Dersleri Kartları Listesi (2 Sütunlu Kompakt Grid - Kaydırmadan Sığar) */}
+                    <div>
+                      {currentGradeSubjects.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
                           Bu kademe için henüz sınav dersi tanımlanmadı. Yukarıdan ekleyebilir veya ders programından aktarabilirsiniz.
                         </div>
+                      ) : filteredGradeSubjects.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-500 bg-emerald-50/40 rounded-xl border border-dashed border-emerald-200">
+                          <strong>"{newSubName.trim()}"</strong> {getGradeTitle(selectedGrade)} kademesinde henüz ekli değil. <strong>Dersi Ekle</strong> butonuna tıklayarak hemen ekleyebilirsiniz.
+                        </div>
                       ) : (
-                        examSubjectsByGrade[selectedGrade].map(sub => {
-                          const soft = getSubjectSoftColor(sub.name);
-                          const gradeSections = activeGradeSections.map(c => c.name);
-                          const appliedSecs = sub.appliedSections !== undefined ? sub.appliedSections : gradeSections;
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {filteredGradeSubjects.map(sub => {
+                            const soft = getSubjectSoftColor(sub.name);
+                            const isExactMatch = exactDuplicateSubject && exactDuplicateSubject.id === sub.id;
+                            const branchSummary = subjectBranchSummaryMap.get(normalizeTr(sub.name));
 
-                          return (
-                            <div
-                              key={sub.id}
-                              className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${soft.bg} ${soft.border} ${soft.text}`}
-                            >
-                              <div className="flex items-center justify-between w-full gap-2">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="font-extrabold text-sm truncate">
-                                    {sub.name}
-                                  </span>
-                                  {sub.isMajor && (
-                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
-                                      ⭐ Ana Ders (1. Seans)
+                            return (
+                              <div
+                                key={sub.id}
+                                className={`py-2 px-2.5 rounded-xl border transition-all flex flex-col gap-1.5 ${soft.bg} ${soft.border} ${soft.text} ${
+                                  isExactMatch ? 'ring-2 ring-rose-500 shadow-xs' : ''
+                                } ${sub.isMebExam ? 'ring-2 ring-purple-500/70' : ''}`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                                    <span className="font-bold text-[11px] truncate">
+                                      {sub.name}
                                     </span>
-                                  )}
-                                </div>
-
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {/* Ana Ders Toggle Butonu */}
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleExamSubjectMajor(selectedGrade, sub.id)}
-                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
-                                      sub.isMajor 
-                                        ? 'bg-amber-600 text-white border-amber-700' 
-                                        : 'bg-white/80 hover:bg-white text-slate-700 border-slate-300'
-                                    }`}
-                                    title="Ana ders olarak işaretle (Günde en fazla 1 adet ve 1. seansta uygulanır)"
-                                  >
-                                    {sub.isMajor ? '★ Ana Ders' : '☆ Yan Ders Yap'}
-                                  </button>
-
-                                  {/* Dersi Sil Butonu */}
-                                  <button
-                                    type="button"
-                                    onClick={() => deleteExamSubject(selectedGrade, sub.id)}
-                                    className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                                    title="Dersi Sil"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Uygulanacak Şubeler Seçimi (KULLANICI TALEBİ) */}
-                              {activeGradeSections.length > 0 && (
-                                <div className="pt-2 border-t border-slate-200/60 flex flex-wrap items-center justify-between gap-2 text-xs">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="text-[11px] font-bold text-slate-600 mr-1">
-                                      Uygulanacak Şubeler:
-                                    </span>
-                                    {activeGradeSections.map(sec => {
-                                      const isSecSelected = appliedSecs.includes(sec.name);
-
-                                      return (
-                                        <button
-                                          key={sec.id}
-                                          type="button"
-                                          onClick={() => handleToggleSubjectSection(selectedGrade, sub.id, sec.name)}
-                                          className={`px-2 py-0.5 rounded-md text-[10px] font-black transition-all cursor-pointer border ${
-                                            isSecSelected
-                                              ? 'bg-white text-slate-900 border-slate-400 shadow-2xs'
-                                              : 'bg-transparent text-slate-400 border-transparent hover:border-slate-300 line-through'
-                                          }`}
-                                          title={isSecSelected ? `${sec.name} şubesinde bu sınav yapılacak` : `${sec.name} hariç tutuldu`}
-                                        >
-                                          {sec.name}
-                                        </button>
-                                      );
-                                    })}
+                                    {sub.isMajor && (
+                                      <span className="text-[9px] font-black px-1.5 py-0 rounded-full bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
+                                        ⭐ Ana
+                                      </span>
+                                    )}
+                                    {sub.isMebExam && (
+                                      <span className="text-[9px] font-black px-1.5 py-0 rounded-full bg-purple-700 text-white border border-purple-800 shrink-0">
+                                        🏛️ MEB Ortak
+                                      </span>
+                                    )}
                                   </div>
 
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleAllSections(selectedGrade, sub.id)}
-                                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800 underline cursor-pointer"
-                                  >
-                                    {appliedSecs.length === activeGradeSections.length ? 'Temizle' : 'Tüm Şubeler'}
-                                  </button>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {/* MEB Ortak Sınav Yap Toggle Butonu */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextMeb = !sub.isMebExam;
+                                        const defaultDate = sub.mebDate || workingDays[0]?.date || examSettings.startDate;
+                                        updateExamSubjectMebConfig(selectedGrade, sub.id, {
+                                          isMebExam: nextMeb,
+                                          mebDate: nextMeb ? defaultDate : null,
+                                          mebSlot: nextMeb ? (sub.mebSlot || firstSlot) : null
+                                        }, false);
+                                        showToast(
+                                          nextMeb
+                                            ? `🏛️ "${sub.name}" (${getGradeTitle(selectedGrade)}) MEB Ortak Sınavı olarak işaretlendi.`
+                                            : `"${sub.name}" MEB ortak sınavından çıkarıldı.`
+                                        );
+                                      }}
+                                      className={`px-1.5 py-0.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1 ${
+                                        sub.isMebExam
+                                          ? 'bg-purple-700 hover:bg-purple-800 text-white border-purple-800'
+                                          : 'bg-white/90 hover:bg-purple-50 text-slate-700 hover:text-purple-900 border-slate-300 hover:border-purple-300'
+                                      }`}
+                                      title="MEB tarafından tarihi önceden belirlenen ortak sınav olarak sabitle (Zümre boş gün şartı aranmaz)"
+                                    >
+                                      <span>🏛️ MEB</span>
+                                    </button>
+
+                                    {/* Ana Ders Yap Toggle Butonu */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleMajor(selectedGrade, sub)}
+                                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1 ${
+                                        sub.isMajor 
+                                          ? 'bg-amber-600 hover:bg-amber-700 text-white border-amber-700' 
+                                          : 'bg-white/90 hover:bg-amber-50 text-slate-700 hover:text-amber-900 border-slate-300 hover:border-amber-300'
+                                      }`}
+                                      title={
+                                        sub.isMajor
+                                          ? 'Ana derslikten çıkarmak için tıklayın'
+                                          : 'Ana ders yapmak için tıklayın'
+                                      }
+                                    >
+                                      <Star size={10} className={sub.isMajor ? 'fill-white text-white' : 'text-amber-500'} />
+                                      <span>{sub.isMajor ? 'Ana Ders' : 'Ana Yap'}</span>
+                                    </button>
+
+                                    {/* Dersi Sil Butonu */}
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteExamSubject(selectedGrade, sub.id)}
+                                      className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                      title="Dersi Sil"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })
+
+                                {/* Zümre Öğretmen Uygunluk Bilgisi */}
+                                {branchSummary && (
+                                  <div className="flex flex-wrap items-center justify-between gap-1 text-[9.5px] opacity-90">
+                                    <span
+                                      className="inline-flex items-center gap-1 font-semibold text-slate-600"
+                                      title={branchSummary.teacherNames.join(', ') || 'Zümre öğretmeni tanımlı değil'}
+                                    >
+                                      <Users size={10} className="text-slate-500" />
+                                      {branchSummary.teacherCount > 0
+                                        ? `Zümre: ${branchSummary.teacherCount} Öğrt.`
+                                        : 'Zümre tanımlı değil (Esnek)'}
+                                    </span>
+                                    {!sub.isMebExam && branchSummary.closedDays.length > 0 && (
+                                      <span className="px-1.5 py-0 rounded bg-rose-100 text-rose-800 border border-rose-200 font-bold">
+                                        ⛔ {branchSummary.closedDays.join(', ')} zümre kapalı
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* MEB Ortak Sınav Tarih ve Seans Seçici Panel */}
+                                {sub.isMebExam && (
+                                  <div className="mt-0.5 pt-1.5 border-t border-purple-200/80 bg-white/95 rounded-lg p-1.5 flex flex-wrap items-center justify-between gap-1.5 text-slate-800">
+                                    <div className="flex items-center gap-1 flex-1 min-w-[130px]">
+                                      <span className="text-[9px] font-black text-purple-800 uppercase shrink-0">Tarih:</span>
+                                      <select
+                                        value={sub.mebDate || workingDays[0]?.date || ''}
+                                        onChange={(e) =>
+                                          updateExamSubjectMebConfig(selectedGrade, sub.id, {
+                                            isMebExam: true,
+                                            mebDate: e.target.value,
+                                            mebSlot: sub.mebSlot || firstSlot
+                                          }, false)
+                                        }
+                                        className="flex-1 bg-white border border-purple-200 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-800 outline-none focus:ring-1 focus:ring-purple-500"
+                                      >
+                                        {workingDays.map(d => (
+                                          <option key={d.date} value={d.date}>
+                                            {d.formatted}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[9px] font-black text-purple-800 uppercase shrink-0">Seans:</span>
+                                      <select
+                                        value={sub.mebSlot || firstSlot}
+                                        onChange={(e) =>
+                                          updateExamSubjectMebConfig(selectedGrade, sub.id, {
+                                            isMebExam: true,
+                                            mebDate: sub.mebDate || workingDays[0]?.date,
+                                            mebSlot: Number(e.target.value)
+                                          }, false)
+                                        }
+                                        className="bg-white border border-purple-200 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-800 outline-none focus:ring-1 focus:ring-purple-500"
+                                      >
+                                        {sortedExamSlots.map(s => (
+                                          <option key={s} value={s}>{s}. Ders</option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        updateExamSubjectMebConfig(selectedGrade, sub.id, {
+                                          isMebExam: true,
+                                          mebDate: sub.mebDate || workingDays[0]?.date,
+                                          mebSlot: sub.mebSlot || firstSlot
+                                        }, true);
+                                        showToast(`🏛️ "${sub.name}" MEB tarihi tüm kademelerde senkronize edildi.`);
+                                      }}
+                                      className="px-1.5 py-0.5 rounded bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-200 font-bold text-[9.5px] cursor-pointer transition-colors"
+                                      title="Bu MEB sınav tarihini ve seansını diğer kademelerdeki aynı isimli derse de uygula"
+                                    >
+                                      Tüm Kademelere Uygula
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1393,273 +1736,279 @@ export default function ExamPlanner() {
             )}
 
             {/* ------------------------------------------------------- */}
-            {/* 3. DİKEY MENÜ İÇERİĞİ: DAĞITIM & ÇIKAR                 */}
-            {/* 🌟 GÜNLER SÜTUNLARDA · SEANSLAR & KADEMELER SATIRLARDA */}
-            {/* 🌟 SOFT PASTEL RENKLER & DERS KODLARI GİZLİ            */}
+            {/* 3. DİKEY MENÜ İÇERİĞİ: DAĞITIM & ÇIKTILAR               */}
+            {/* 🌟 sinav-takvimi OLUŞTUR VE YAZDIR EKRANI               */}
+            {/* 🌟 SÜRÜKLE-BIRAK İLE DEĞİŞİKLİK & SADE A4 KART ÇIKTISI  */}
             {/* ------------------------------------------------------- */}
             {activeMenu === 'distribution' && (
-              <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="space-y-4 print:space-y-0 animate-in fade-in duration-200">
                 
-                {/* Dağıtım Durumu ve Üst Kontrol */}
-                <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2 text-amber-700 font-black text-xs uppercase tracking-wider mb-1">
-                        <Sparkles size={14} />
-                        <span>3. Adım: Sınav Takvimi Tablosu</span>
+                {/* Üst Kontrol Çubuğu (YAZDIRMA SIRASINDA GİZLENİR) */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3 print:hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
+                      <div>
+                        <div className="flex items-center gap-1.5 text-amber-700 font-black text-[11px] uppercase tracking-wider">
+                          <Sparkles size={13} />
+                          <span>3. Adım: Oluştur &amp; Yazdır</span>
+                        </div>
+                        <h2 className="text-base font-extrabold text-slate-900">
+                          Ortak Sınav Programı (Sürükle-Bırak Düzenleme)
+                        </h2>
                       </div>
-                      <h2 className="text-lg font-extrabold text-slate-900">
-                        Okul Ortak Sınav Takvimi
-                      </h2>
+
+                      {activePlacements.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-3 text-xs font-bold pl-2 border-l border-slate-200">
+                          <span className="flex items-center gap-1.5 text-purple-800 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200">
+                            <span className="w-2.5 h-2.5 rounded-full bg-purple-600 inline-block"></span>
+                            🏛️ MEB Ortak Sınavı
+                          </span>
+                          <span className="flex items-center gap-1.5 text-red-700 bg-red-50 px-2.5 py-1 rounded-lg border border-red-200">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
+                            Kırmızı: Ana / Önemli Ders
+                          </span>
+                          <span className="flex items-center gap-1.5 text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>
+                            Mavi: Diğer Ders
+                          </span>
+                          <span className="text-slate-500 flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-lg">
+                            <Move className="w-3.5 h-3.5 text-slate-600" />
+                            Dersleri sürükleyip bırakarak yer değiştirebilirsiniz
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={handleExportCSV}
-                        className="px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                      >
-                        <FileSpreadsheet size={15} className="text-emerald-600" />
-                        <span>Excel İndir</span>
-                      </button>
-
-                      <button
-                        onClick={() => window.print()}
-                        className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                        title="A4 Yatay tek sayfaya sığdırılmış resmi okul sınav panosunu yazdır"
-                      >
-                        <Printer size={15} />
-                        <span>Yazdır (A4 Yatay)</span>
-                      </button>
-
-                      <button
+                        type="button"
                         onClick={handleGenerate}
-                        className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+                        className="flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 transition font-bold shadow-xs text-xs cursor-pointer"
                       >
-                        <Sparkles size={15} />
-                        <span>Yeniden Dağıt</span>
+                        <RefreshCw className="w-4 h-4" />
+                        <span>{activePlacements.length > 0 ? 'Yeniden Oluştur' : 'Programı Oluştur'}</span>
                       </button>
+
+                      {activePlacements.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => window.print()}
+                          className="flex items-center gap-1.5 bg-green-600 text-white px-4 py-2 rounded-xl hover:bg-green-700 transition font-bold shadow-xs text-xs cursor-pointer"
+                        >
+                          <Printer className="w-4 h-4" />
+                          <span>Programı Yazdır</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Dağıtım Durumu ve İstatistikler */}
-                  {examResult && (
-                    <div className={`p-4 rounded-2xl border flex items-center justify-between flex-wrap gap-3 ${
-                      examResult.success 
-                        ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950' 
-                        : 'bg-amber-50/80 border-amber-200 text-amber-950'
-                    }`}>
-                      <div className="flex items-center gap-3">
-                        {examResult.success ? (
-                          <div className="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-bold">
-                            <CheckCircle2 size={18} />
-                          </div>
-                        ) : (
-                          <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold">
-                            <AlertCircle size={18} />
-                          </div>
-                        )}
-                        <div>
-                          <div className="font-extrabold text-xs">
-                            {examResult.success 
-                              ? `Dağıtım Başarılı: ${workingDays.length} sınav gününde ${examResult.totalSubjects} sınav yerleştirildi!` 
-                              : `Kısmi Dağıtım: ${examResult.unassigned?.length || 0} ders sığdırılamadı.`}
-                          </div>
-                          <div className="text-[11px] opacity-80 mt-0.5">
-                            {examResult.success 
-                              ? 'Tüm okul aynı gün Matematik ve Edebiyat sınavına giriyor. Ana dersler günde 1 tane ve 1. seansta.'
-                              : 'Sığmayan dersler için lütfen 1. menüden takvim günlerini artırın.'}
-                          </div>
-                        </div>
+                  {/* Dağıtım Özeti / Uyarılar */}
+                  {examResult && !examResult.success && (
+                    <div className="p-3 rounded-xl border bg-amber-50/80 border-amber-200 text-amber-950 space-y-1.5 text-xs">
+                      <div className="flex items-center gap-2 font-bold">
+                        <AlertCircle size={16} className="text-amber-600 shrink-0" />
+                        <span>
+                          {examResult.unassigned?.length || 0} ders sığdırılamadı. Sığmayan dersler için 1. adımdan sınav günlerini artırabilir veya kartları sürükleyip bırakarak düzenleyebilirsiniz:
+                        </span>
                       </div>
+                      <ul className="list-disc list-inside text-[11px] text-amber-900 space-y-0.5 pl-1">
+                        {(examResult.unassigned || []).map((u, idx) => (
+                          <li key={idx}>
+                            <strong>{getGradeTitle(u.grade)} - {u.subject?.name}:</strong> {u.reason}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
                 </div>
 
                 {/* HENÜZ DAĞITILMADIYSA ÇAĞRI KARTI */}
-                {!examSchedule && (
-                  <div className="p-12 text-center rounded-3xl bg-white border border-slate-200 shadow-xs my-6 space-y-4">
+                {activePlacements.length === 0 && (
+                  <div className="p-12 text-center rounded-3xl bg-white border border-slate-200 shadow-xs my-6 space-y-4 print:hidden">
                     <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-100 flex items-center justify-center text-3xl mx-auto shadow-2xs">
                       📝
                     </div>
                     <div>
-                      <h3 className="text-base font-extrabold text-slate-900">Ortak Sınav Takvimi Henüz Dağıtılmadı</h3>
+                      <h3 className="text-base font-extrabold text-slate-900">Ortak Sınav Takvimi Henüz Oluşturulmadı</h3>
                       <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">
-                        Tüm okul için ortak sınav günleri, seanslar ve soft renklerle sınav dağıtımını başlatın.
+                        Sade A4 yatay kart görünümü ve sürükle-bırak düzenleme özelliğiyle sınav programını hemen oluşturun.
                       </p>
                     </div>
                     <button
+                      type="button"
                       onClick={handleGenerate}
-                      className="px-6 py-3 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer"
+                      className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer"
                     >
                       <Sparkles size={16} />
-                      <span>Şimdi Otomatik Sınav Takvimini Oluştur</span>
+                      <span>Şimdi Sınav Programını Oluştur</span>
                     </button>
                   </div>
                 )}
 
                 {/* ======================================================= */}
-                {/* 📄 YENİ RESMİ ÇIKTI TABLOSU                             */}
-                {/* 🌟 GÜNLER SÜTUNDA · SEANSLAR & KADEMELER SATIRLARDA     */}
-                {/* 🌟 SOFT PASTEL RENKLER & DERS KODLARI GİZLİ            */}
+                {/* 📄 sinav-takvimi OLUŞTUR & YAZDIR EKRANI (PRINT-AREA)   */}
+                {/* 🌟 2 SATIRLI GÜN KARTLARI · SÜRÜKLE-BIRAK DESTEKLİ      */}
                 {/* ======================================================= */}
-                {examSchedule && (
-                  <div className="print-page-fit bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xs print:border-black print:shadow-none print:rounded-none">
+                {activePlacements.length > 0 && (
+                  <div className="print-area w-full bg-white rounded-xl shadow-sm border border-gray-200 p-4 h-auto min-h-[75vh] flex flex-col justify-between">
                     
-                    {/* Resmi Kurum Başlığı (Yazdırıldığında da görünür) */}
-                    <div className="p-4 sm:p-5 border-b border-slate-200 flex justify-between items-center bg-slate-50/60 print:bg-white print:border-black print:p-2">
-                      <div>
-                        <div className="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-widest print:text-black">
-                          T.C. MİLLİ EĞİTİM BAKANLIĞI
-                        </div>
-                        <h2 className="text-sm sm:text-base font-black text-slate-900 print:text-black mt-0.5">
-                          {settings?.schoolName || 'Okul'} — Ortak Yazılı Sınav Takvimi
-                        </h2>
-                        <p className="text-[10px] sm:text-xs text-slate-500 print:text-gray-800 mt-0.5">
-                          Tarih Aralığı: {examSettings.startDate} — {examSettings.endDate} &nbsp;|&nbsp; Günlük Seanslar: {examSlots.join('. ve ')}. Ders Saatleri
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2 print:hidden">
-                        <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                          Resmi Okul Panosu
-                        </span>
-                        <button
-                          onClick={() => window.print()}
-                          className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer"
-                        >
-                          <Printer size={14} />
-                          <span>Yazdır (A4)</span>
-                        </button>
-                      </div>
+                    {/* Üst Resmi Başlık */}
+                    <div className="text-center border-b-4 border-double border-black pb-1 mb-2 print:mb-1.5 flex-shrink-0">
+                      <h1 className="text-base print:text-sm font-black tracking-wide m-0 uppercase text-black">
+                        {settings?.schoolName || 'OKUL ADI GİRİLMEDİ'}
+                      </h1>
+                      <h2 className="text-[11px] print:text-[10px] font-bold uppercase mt-0.5 tracking-wider text-black">
+                        {examSettings?.schoolYear || '2026-2027'} EĞİTİM ÖĞRETİM YILI {examSettings?.semester || '1'}. DÖNEM {(examSettings?.examNo || '1') === '1' ? '1. ORTAK' : '2. ORTAK'} GENEL YAZILI SINAV PROGRAMI
+                      </h2>
                     </div>
 
-                    {/* YENİ RESMİ MATRİS TABLOSU */}
-                    <div className="overflow-x-auto print:overflow-visible">
-                      <table className="print-matrix-table w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-slate-100 border-b border-slate-300 text-slate-800 font-extrabold uppercase tracking-wider print:bg-gray-200 print:text-black print:border-black">
-                            <th className="p-3 w-28 text-center border-r border-slate-300 print:border-black print:p-1">
-                              Seans
-                            </th>
-                            <th className="p-3 w-32 text-center border-r border-slate-300 print:border-black print:p-1">
-                              Kademe / Sınıf
-                            </th>
-                            {workingDays.map(day => (
-                              <th 
-                                key={day.date} 
-                                className="p-2.5 text-center border-l border-slate-300 print:border-black print:p-1 min-w-[110px]"
-                              >
-                                <div className="font-black text-xs print:text-black">{day.dayName}</div>
-                                <div className="text-[10px] font-mono opacity-75 print:text-black">{day.date}</div>
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-
-                        <tbody className="divide-y divide-slate-200 print:divide-black">
-                          {examSlots.map((slot, si) => (
-                            <React.Fragment key={`slot-group-${slot}`}>
-                              {grades.map((grade, gi) => {
-                                const allGradeSections = getGradeSections(grade, classrooms);
-
+                    {/* 2 Satırlı Gün Kartları Alanı (Sadece Sınav Yapılan Tarihler) */}
+                    <div className="flex-1 flex flex-col gap-3 print:gap-1.5 justify-between">
+                      {/* 1. Satır Günler */}
+                      <div className="flex-1 flex gap-2 print:gap-1.5 w-full items-stretch">
+                        {firstRowDates.map(dateStr => (
+                          <div
+                            key={dateStr}
+                            className="flex-1 min-w-0 border border-black rounded bg-white flex flex-col shadow-sm"
+                          >
+                            <div className="bg-gray-800 text-white py-1 px-1 text-center font-bold text-[10px] print:text-[9px] uppercase border-b border-black shrink-0">
+                              {new Date(dateStr + 'T00:00:00').toLocaleDateString('tr-TR', {
+                                weekday: 'long',
+                                day: 'numeric',
+                                month: 'short'
+                              })}
+                            </div>
+                            <div className="flex-1 flex flex-col p-1.5 print:p-1 gap-1.5 print:gap-1 bg-gray-50/30">
+                              {sortedExamSlots.map(slot => {
+                                const slotPlacements = activePlacements.filter(
+                                  pl => pl.date === dateStr && Number(pl.slot) === Number(slot)
+                                );
                                 return (
-                                  <tr key={`${slot}-${grade}`} className="hover:bg-slate-50/70 transition-colors print:hover:bg-white">
-                                    
-                                    {/* SEANS BAŞLIĞI (rowSpan ile sadece ilk kademe satırında çizilir) */}
-                                    {gi === 0 && (
-                                      <td 
-                                        rowSpan={grades.length} 
-                                        className="p-2 font-black text-center align-middle border-r border-slate-300 bg-slate-100/90 text-slate-900 print:bg-gray-100 print:text-black print:border-black"
-                                      >
-                                        <div className="text-xs sm:text-sm font-black">
-                                          {si + 1}. Seans
-                                        </div>
-                                        <div className="text-[10px] font-bold text-slate-500 print:text-black mt-0.5">
-                                          ({slot}. Ders Saati)
-                                        </div>
-                                        {si === 0 && (
-                                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-bold block mt-1 print:hidden">
-                                            Ana Dersler
-                                          </span>
-                                        )}
-                                      </td>
-                                    )}
-
-                                    {/* KADEME ADI */}
-                                    <td className="p-2 font-black text-center border-r border-slate-300 bg-slate-50/60 text-slate-900 print:bg-white print:text-black print:border-black whitespace-nowrap">
-                                      <div className="text-xs">{getGradeTitle(grade)}</div>
-                                      {getGradeBadge(grade) && (
-                                        <div className="text-[9px] text-slate-500 font-normal print:hidden">{getGradeBadge(grade)}</div>
-                                      )}
-                                    </td>
-
-                                    {/* GÜNLERE GÖRE SINAV HÜCRELERİ (DERS KODLARI GÖSTERİLMEZ!) */}
-                                    {workingDays.map(day => {
-                                      const sub = examSchedule?.[grade]?.[day.date]?.[slot];
-
-                                      return (
-                                        <td 
-                                          key={`${grade}-${day.date}-${slot}`} 
-                                          className="p-1.5 text-center border-l border-slate-200 print:border-black print:p-0.5 align-middle"
+                                  <div
+                                    key={`${dateStr}-${slot}`}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={(e) => handleDrop(e, dateStr, slot)}
+                                    style={{ flexGrow: Math.max(1, slotPlacements.length), flexBasis: 'auto' }}
+                                    className="flex flex-col border border-dashed border-gray-300 rounded p-1.5 print:p-1 bg-white transition-colors hover:bg-blue-50/30 min-h-[54px] print:min-h-[34px]"
+                                  >
+                                    <div className="text-[9px] print:text-[8px] font-bold text-blue-600 mb-1 print:mb-0.5 border-b border-gray-100 pb-0.5 print:pb-0 shrink-0">
+                                      {slot}. Ders
+                                    </div>
+                                    <div className="flex flex-col gap-1 print:gap-0.5">
+                                      {slotPlacements.map(p => (
+                                        <div
+                                          key={p.id}
+                                          draggable={true}
+                                          onDragStart={(e) => handleDragStart(e, p.id)}
+                                          className={`p-1 print:p-0.5 rounded border text-left leading-none cursor-grab active:cursor-grabbing flex items-start justify-between group/item ${
+                                            p.isMebExam
+                                              ? 'bg-purple-50 border-purple-300'
+                                              : p.isMajor
+                                              ? 'bg-red-50 border-red-200'
+                                              : 'bg-blue-50 border-blue-200'
+                                          }`}
                                         >
-                                          {sub ? (
-                                            (() => {
-                                              const soft = getSubjectSoftColor(sub.name);
-                                              const isSectionFiltered = sub.appliedSections && sub.appliedSections.length > 0 && sub.appliedSections.length < allGradeSections.length;
-
-                                              return (
-                                                <div className={`p-1.5 sm:p-2 rounded-xl border text-center transition-all ${soft.bg} ${soft.border} ${soft.text} shadow-2xs print:border-black print:bg-white print:p-0.5 print:rounded-none`}>
-                                                  {/* DERS ADI (BÜYÜK VE OKUNAKLI) */}
-                                                  <div className="font-black text-xs leading-tight print:text-black" title={sub.name}>
-                                                    {sub.name}
-                                                  </div>
-
-                                                  {/* ANA DERS İŞARETİ */}
-                                                  {sub.isMajor && (
-                                                    <div className="text-[9px] font-bold opacity-80 mt-0.5 print:text-black">
-                                                      ⭐ Ana Ders
-                                                    </div>
-                                                  )}
-
-                                                  {/* ŞUBE FİLTRESİ (TÜM ŞUBELER DEĞİLSE GÖSTER) */}
-                                                  {isSectionFiltered && (
-                                                    <div className="text-[9px] font-bold opacity-80 mt-0.5 print:text-black truncate" title={`Şubeler: ${sub.appliedSections.join(', ')}`}>
-                                                      ({sub.appliedSections.join(', ')})
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              );
-                                            })()
-                                          ) : (
-                                            <div className="text-center text-slate-300 print:text-gray-300 text-xs italic select-none">
-                                              —
+                                          <div className="w-full min-w-0">
+                                            <div className="font-black text-[10px] print:text-[8.5px] text-black uppercase tracking-tight leading-tight flex items-center gap-1 flex-wrap">
+                                              <span>{p.name}</span>
+                                              {p.isMebExam && (
+                                                <span className="px-1 py-0 rounded bg-purple-700 text-white text-[8px] print:text-[7px] font-extrabold shrink-0">
+                                                  MEB
+                                                </span>
+                                              )}
                                             </div>
-                                          )}
-                                        </td>
-                                      );
-                                    })}
-
-                                  </tr>
+                                            <div className="text-[8px] print:text-[7px] font-bold text-gray-600 mt-0.5 print:mt-0 leading-tight">
+                                              Sınıf: {(p.levels || []).join(', ')}
+                                            </div>
+                                          </div>
+                                          <Move className="w-3 h-3 text-gray-400 opacity-0 group-hover/item:opacity-100 flex-shrink-0 ml-1 print:hidden" />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
                                 );
                               })}
-                            </React.Fragment>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 2. Satır Günler */}
+                      {secondRowDates.length > 0 && (
+                        <div className="flex-1 flex gap-2 print:gap-1.5 w-full items-stretch">
+                          {secondRowDates.map(dateStr => (
+                            <div
+                              key={dateStr}
+                              className="flex-1 min-w-0 border border-black rounded bg-white flex flex-col shadow-sm"
+                            >
+                              <div className="bg-gray-800 text-white py-1 px-1 text-center font-bold text-[10px] print:text-[9px] uppercase border-b border-black shrink-0">
+                                {new Date(dateStr + 'T00:00:00').toLocaleDateString('tr-TR', {
+                                  weekday: 'long',
+                                  day: 'numeric',
+                                  month: 'short'
+                                })}
+                              </div>
+                              <div className="flex-1 flex flex-col p-1.5 print:p-1 gap-1.5 print:gap-1 bg-gray-50/30">
+                                {sortedExamSlots.map(slot => {
+                                  const slotPlacements = activePlacements.filter(
+                                    pl => pl.date === dateStr && Number(pl.slot) === Number(slot)
+                                  );
+                                  return (
+                                    <div
+                                      key={`${dateStr}-${slot}`}
+                                      onDragOver={(e) => e.preventDefault()}
+                                      onDrop={(e) => handleDrop(e, dateStr, slot)}
+                                      style={{ flexGrow: Math.max(1, slotPlacements.length), flexBasis: 'auto' }}
+                                      className="flex flex-col border border-dashed border-gray-300 rounded p-1.5 print:p-1 bg-white transition-colors hover:bg-blue-50/30 min-h-[54px] print:min-h-[34px]"
+                                    >
+                                      <div className="text-[9px] print:text-[8px] font-bold text-blue-600 mb-1 print:mb-0.5 border-b border-gray-100 pb-0.5 print:pb-0 shrink-0">
+                                        {slot}. Ders
+                                      </div>
+                                      <div className="flex flex-col gap-1 print:gap-0.5">
+                                        {slotPlacements.map(p => (
+                                          <div
+                                            key={p.id}
+                                            draggable={true}
+                                            onDragStart={(e) => handleDragStart(e, p.id)}
+                                            className={`p-1 print:p-0.5 rounded border text-left leading-none cursor-grab active:cursor-grabbing flex items-start justify-between group/item ${
+                                              p.isMebExam
+                                                ? 'bg-purple-50 border-purple-300'
+                                                : p.isMajor
+                                                ? 'bg-red-50 border-red-200'
+                                                : 'bg-blue-50 border-blue-200'
+                                            }`}
+                                          >
+                                            <div className="w-full min-w-0">
+                                              <div className="font-black text-[10px] print:text-[8.5px] text-black uppercase tracking-tight leading-tight flex items-center gap-1 flex-wrap">
+                                                <span>{p.name}</span>
+                                                {p.isMebExam && (
+                                                  <span className="px-1 py-0 rounded bg-purple-700 text-white text-[8px] print:text-[7px] font-extrabold shrink-0">
+                                                    MEB
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="text-[8px] print:text-[7px] font-bold text-gray-600 mt-0.5 print:mt-0 leading-tight">
+                                                Sınıf: {(p.levels || []).join(', ')}
+                                              </div>
+                                            </div>
+                                            <Move className="w-3 h-3 text-gray-400 opacity-0 group-hover/item:opacity-100 flex-shrink-0 ml-1 print:hidden" />
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
                           ))}
-                        </tbody>
-                      </table>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Resmi İmza & Onay Alanı (Yazdırma için) */}
-                    <div className="p-3.5 sm:p-5 border-t border-slate-200 print:border-black flex justify-between items-center text-xs text-slate-700 print:text-black print:p-2 print:text-[10px]">
-                      <div className="text-center">
-                        <div className="font-bold">Sınav Yürütme Komisyonu</div>
-                        <div className="mt-4 sm:mt-6 text-[10px] text-slate-400 print:text-black">İmza / Kaşe</div>
-                      </div>
-                      <div className="text-center font-bold">
-                        UYGUNDUR<br />
-                        <span className="text-[10px] font-normal">{new Date().toLocaleDateString('tr-TR')}</span>
-                        <div className="mt-3 sm:mt-4 font-extrabold text-slate-900 print:text-black">
-                          {settings?.principalName || 'Okul Müdürü'}
-                        </div>
+                    {/* Alt İmza Alanı */}
+                    <div className="mt-2 print:mt-1.5 flex justify-end items-end text-[9px] font-bold text-gray-700 print:text-black px-1 flex-shrink-0">
+                      <div className="text-center w-36 border-t border-black pt-1 uppercase text-black text-[9px] font-black">
+                        Okul Sınav Komisyonu
                       </div>
                     </div>
 

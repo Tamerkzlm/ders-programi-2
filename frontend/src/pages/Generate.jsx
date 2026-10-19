@@ -631,6 +631,93 @@ export default function Generate() {
         </div>
       )}
 
+      {/* 🎯 NOKTA ATIŞI KURAL ESNETME RAPORU (HANGİ ÖĞRETMENDE KURAL ESNETİLDİ?) */}
+      {!isGenerating && generateResult && generateResult.success && metrics && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-3">
+          <div className="flex items-center justify-between text-slate-800 font-bold text-xs flex-wrap gap-2 pb-2 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <ShieldAlert size={17} className={(metrics.relaxedRules && metrics.relaxedRules.length > 0) ? "text-amber-600" : "text-emerald-600"} />
+              <div>
+                <h2 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                  Nokta Atışı Kural Esnetme Raporu (Öğretmen Bazlı)
+                </h2>
+                <p className="text-[11px] text-slate-500 font-normal mt-0.5">
+                  Dağıtım sırasında okulun tamamında kuralları kapatmak yerine yalnızca darboğaz oluşan öğretmenlerde yapılan lokal esnetmeler
+                </p>
+              </div>
+            </div>
+
+            <span className={`text-[11px] font-black px-2.5 py-1 rounded-xl border ${
+              (metrics.relaxedRules && metrics.relaxedRules.length > 0)
+                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+            }`}>
+              {(metrics.relaxedRules && metrics.relaxedRules.length > 0)
+                ? `${metrics.relaxedRules.length} Noktada Esnetme Yapıldı`
+                : '0 Esnetme (Tüm Kurallar %100 Korundu ✓)'}
+            </span>
+          </div>
+
+          {(metrics.relaxedRules && metrics.relaxedRules.length > 0) ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              {metrics.relaxedRules.map((r, idx) => (
+                <div
+                  key={idx}
+                  onClick={() => {
+                    if (r.teacherId) {
+                      navigate('/timetable', { state: { teacherId: r.teacherId, viewMode: 'teacher' } });
+                    }
+                  }}
+                  className="p-3 rounded-xl bg-amber-50/50 hover:bg-indigo-50/60 border border-amber-200 hover:border-indigo-300 flex flex-col gap-1.5 text-xs cursor-pointer transition-all group"
+                  title={`${r.teacherName} haftalık ders programını incele`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-black text-slate-900 group-hover:text-indigo-700 truncate">
+                        {r.teacherName}
+                      </span>
+                      <ArrowRight size={12} className="text-slate-400 group-hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                    </div>
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300/70 shrink-0">
+                      {r.ruleType}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[10px] font-bold text-slate-600">
+                    {r.className && r.className !== '-' && (
+                      <span className="bg-white px-2 py-0.5 rounded border border-slate-200 text-indigo-700">
+                        Sınıf: {r.className}
+                      </span>
+                    )}
+                    {r.day && (
+                      <span className="bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-700">
+                        Gün: {r.day}
+                      </span>
+                    )}
+                    {r.subject && r.subject !== '-' && (
+                      <span className="bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-500 truncate">
+                        {r.subject}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-amber-900 font-medium leading-relaxed mt-0.5">
+                    {r.description}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-emerald-700 bg-emerald-50 border border-emerald-100 p-3 rounded-xl text-xs font-bold flex items-center gap-2">
+              <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+              <span>
+                Harika! Hiçbir öğretmende günlük sınıf ders sınırı, blok bütünlüğü veya asgari ders kuralı esnetilmeden %100 kurallara uygun dağıtım tamamlandı.
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* UYARI VE İHLAL LİSTESİ */}
       {!isGenerating && generateResult && generateResult.success && generateResult.warnings && generateResult.warnings.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 shadow-xs space-y-3">

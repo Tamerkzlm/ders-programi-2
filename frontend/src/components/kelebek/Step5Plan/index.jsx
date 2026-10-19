@@ -73,10 +73,6 @@ export default function Step5Plan({ plan, examInfo = {}, onBack, onRegenerate })
     setLocalPlan({ ...localPlan, assignments: newAssignments, violations: totalViolations });
   };
 
-  const handleExcelExport = () => {
-    exportPlanToExcel(localPlan, examInfo);
-  };
-
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Header Bar */}
@@ -95,15 +91,6 @@ export default function Step5Plan({ plan, examInfo = {}, onBack, onRegenerate })
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Excel Export */}
-          <button
-            onClick={handleExcelExport}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-all shadow-2xs active:scale-95 cursor-pointer"
-            title="Tüm salon ve şube listelerini Excel (.xlsx) dosyası olarak indir"
-          >
-            <FileSpreadsheet className="w-4 h-4" /> Excel'e Aktar
-          </button>
-
           {/* Salon Kapı Listesi */}
           <button
             onClick={() => openPrintWindow(buildDoorListHTML(localPlan, examInfo))}

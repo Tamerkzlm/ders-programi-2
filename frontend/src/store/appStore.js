@@ -2,7 +2,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { solveDykSchedule } from '../utils/dykEngine';
-import { solveExamSchedule, solveSupervisors, DEFAULT_EXAM_SUBJECTS } from '../utils/examEngine';
+import { solveExamSchedule, solveSupervisors, DEFAULT_EXAM_SUBJECTS, buildScheduleFromPlacements } from '../utils/examEngine';
 
 // Backend adresi: .env dosyasındaki VITE_API_URL (boşsa yerel geliştirme sunucusu)
 const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
@@ -420,22 +420,30 @@ export const calculateLiveMetrics = (timetable, teachers = [], classrooms = [], 
   };
 };
 
-// 🚨 CANLI İHLAL VE ÇAKIŞMA DENETİM MOTORU
-// Manuel sürükle-bırak, ders taşıma veya silme yapıldığında anında çalışarak
-// dağıtım motorunun "İhlaller ve Raporlar" panelini dinamik olarak günceller.
-export const calculateLiveViolations = (timetable, teachers = [], classrooms = [], settings = {}, hardPrefs = {}) => {
-  const violations = [];
-  if (!timetable || Object.keys(timetable).length === 0) return violations;
+// 🔧 CANLI KURAL ESNETME DENETİM MOTORU (Öğretmen & Sınıf Bazlı)
+export const calculateLiveRelaxedRules = (timetable, teachers = [], classrooms = [], settings = {}, hardPrefs = {}) => {
+  const relaxedRules = [];
+  if (!timetable || Object.keys(timetable).length === 0) return relaxedRules;
 
   const days = settings?.days || ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"];
   const maxGaps = hardPrefs?.maxGapsPerDay ?? 2;
   const minDaily = hardPrefs?.minDailyHours ?? 3;
   const enforceGaps = hardPrefs?.enforceMaxGaps !== false;
   const enforceBalance = hardPrefs?.enforceDailyBalance !== false;
+  const enforceConsecutive = hardPrefs?.enforceConsecutiveClassRules !== false;
 
-  // 1. Öğretmenlerin haftalık toplam müfredat yükleri
+  const teacherMap = {};
   const teacherLoads = {};
-  (teachers || []).forEach(t => { teacherLoads[t.id] = 0; });
+  const teacherOpenDays = {};
+  const numPeriods = Number(settings?.periodsPerDay) || 8;
+
+  (teachers || []).forEach(t => {
+    teacherMap[t.id] = t;
+    teacherLoads[t.id] = 0;
+    const openDays = days.filter(d => (t.unavailable?.[d] || []).length < numPeriods).length;
+    teacherOpenDays[t.id] = openDays;
+  });
+
   (classrooms || []).forEach(c => {
     (c.courses || []).forEach(co => {
       if (co.teacherId && teacherLoads[co.teacherId] !== undefined) {
@@ -444,7 +452,195 @@ export const calculateLiveViolations = (timetable, teachers = [], classrooms = [
     });
   });
 
-  // 2. Tablodaki yerleşimleri tara (Öğretmen ve Sınıf çakışmaları, kapalı saatler)
+  const isTeacherExemptOrPartTime = (tId) => {
+    const t = teacherMap[tId];
+    if (!t) return true;
+    const load = teacherLoads[tId] || 0;
+    const openD = teacherOpenDays[tId] ?? days.length;
+    const isPartTime = (openD <= 2 && load < 17 && load > 0) || (t.isExempt && load < 17);
+    const isExempt = Boolean(t.isExempt) || load <= 8 || isPartTime || Boolean(t.isAdministrator);
+    return isExempt || isPartTime;
+  };
+
+  // 1. Öğretmen-Sınıf Bitişiklik ve Günlük Ders Yükü Esnetmeleri
+  if (enforceConsecutive) {
+    (classrooms || []).forEach(c => {
+      const cDays = timetable[c.id] || {};
+      const pairWeekly = {};
+      days.forEach(d => {
+        (cDays[d] || []).forEach(slot => {
+          if (slot.teacherId) {
+            pairWeekly[slot.teacherId] = (pairWeekly[slot.teacherId] || 0) + 1;
+          }
+        });
+      });
+
+      days.forEach(d => {
+        const slots = cDays[d] || [];
+        const byT = {};
+        slots.forEach(slot => {
+          if (slot.teacherId) {
+            if (!byT[slot.teacherId]) byT[slot.teacherId] = [];
+            byT[slot.teacherId].push(slot);
+          }
+        });
+
+        Object.entries(byT).forEach(([tId, tSlots]) => {
+          if (isTeacherExemptOrPartTime(tId)) return;
+          const tObj = teacherMap[tId];
+          const tName = tObj?.name || 'Öğretmen';
+          const weeklyInClass = pairWeekly[tId] || 0;
+          const maxAllowed = weeklyInClass <= 10 ? 2 : 4;
+          const periods = tSlots.map(s => Number(s.period)).sort((a, b) => a - b);
+          const subjects = Array.from(new Set(tSlots.map(s => s.subject || 'Ders')));
+          const subjStr = subjects.join(', ');
+
+          if (periods.length > maxAllowed) {
+            const desc = `${tName} (${c.name} – ${subjStr}): ${d} günü aynı sınıfa ${periods.length} saat ders yerleşti (normal sınır: en fazla ${maxAllowed} saat).`;
+            relaxedRules.push({
+              teacherId: tId,
+              teacherName: tName,
+              classId: c.id,
+              className: c.name,
+              subject: subjStr,
+              day: d,
+              ruleType: 'Aynı Sınıfa Günlük Ders Yükü Esnetmesi',
+              description: desc
+            });
+          }
+
+          if (periods.length >= 2 && weeklyInClass <= 10) {
+            let blocks = 1;
+            for (let i = 1; i < periods.length; i++) {
+              if (periods[i] !== periods[i - 1] + 1) blocks++;
+            }
+            if (blocks > 1) {
+              const pStr = periods.map(p => `${p}.`).join(', ');
+              const desc = `${tName} (${c.name} – ${subjStr}): ${d} günü dersler bitişik blok yerine ayrık saatlere (${pStr} saatler) yerleşti.`;
+              relaxedRules.push({
+                teacherId: tId,
+                teacherName: tName,
+                classId: c.id,
+                className: c.name,
+                subject: subjStr,
+                day: d,
+                ruleType: 'Blok Bitişikliği Esnetmesi',
+                description: desc
+              });
+            }
+          }
+        });
+      });
+    });
+  }
+
+  // 2. Öğretmen Bazlı Pencere, Asgari Saat ve Esnek Boş Gün Esnetmeleri
+  const teacherBusy = {};
+  (teachers || []).forEach(t => {
+    teacherBusy[t.id] = {};
+    days.forEach(d => { teacherBusy[t.id][d] = []; });
+  });
+
+  Object.keys(timetable).forEach(cId => {
+    const cDays = timetable[cId] || {};
+    days.forEach(d => {
+      (cDays[d] || []).forEach(slot => {
+        if (slot.teacherId && teacherBusy[slot.teacherId]?.[d]) {
+          teacherBusy[slot.teacherId][d].push(Number(slot.period));
+        }
+      });
+    });
+  });
+
+  (teachers || []).forEach(t => {
+    const load = teacherLoads[t.id] || 0;
+    if (load <= 0) return;
+    const exempt = isTeacherExemptOrPartTime(t.id);
+    const hours = {};
+
+    days.forEach(d => {
+      const uniquePeriods = Array.from(new Set(teacherBusy[t.id]?.[d] || [])).sort((a, b) => a - b);
+      hours[d] = uniquePeriods.length;
+      if (uniquePeriods.length > 1) {
+        const span = uniquePeriods[uniquePeriods.length - 1] - uniquePeriods[0] + 1;
+        const g = span - uniquePeriods.length;
+        if (!exempt && enforceGaps && g > maxGaps) {
+          const desc = `${t.name} – ${d}: ${g} saat pencere oluştu (normal sınır: en fazla ${maxGaps} boşluk).`;
+          relaxedRules.push({
+            teacherId: t.id,
+            teacherName: t.name,
+            classId: null,
+            className: null,
+            subject: t.branch,
+            day: d,
+            ruleType: 'Günlük Azami Pencere Esnetmesi',
+            description: desc
+          });
+        }
+      }
+    });
+
+    const activeDays = days.filter(d => (hours[d] || 0) > 0);
+    if (!exempt && enforceBalance) {
+      const adaptiveMin = Math.min(minDaily, load);
+      activeDays.forEach(d => {
+        if (hours[d] < adaptiveMin) {
+          const desc = `${t.name} – ${d}: Günde ${hours[d]} saat ders yerleşti (asgari ${adaptiveMin} saat kuralı esnetildi).`;
+          relaxedRules.push({
+            teacherId: t.id,
+            teacherName: t.name,
+            classId: null,
+            className: null,
+            subject: t.branch,
+            day: d,
+            ruleType: 'Günlük Asgari Ders Saati Esnetmesi',
+            description: desc
+          });
+        }
+      });
+    }
+
+    const fDay = t.floatingConstraints?.freeDayPreference || 'none';
+    if (fDay === 'floating_1_day' && activeDays.length > days.length - 1) {
+      const desc = `${t.name}: 1 gün esnek boş gün tercihi esnetildi (${activeDays.length} güne ders yerleşti).`;
+      relaxedRules.push({
+        teacherId: t.id,
+        teacherName: t.name,
+        classId: null,
+        className: null,
+        subject: t.branch,
+        day: 'Haftalık',
+        ruleType: 'Esnek Boş Gün Esnetmesi',
+        description: desc
+      });
+    } else if (fDay === 'floating_2_days' && activeDays.length > days.length - 2) {
+      const desc = `${t.name}: 2 gün esnek boş gün tercihi esnetildi (${activeDays.length} güne ders yerleşti).`;
+      relaxedRules.push({
+        teacherId: t.id,
+        teacherName: t.name,
+        classId: null,
+        className: null,
+        subject: t.branch,
+        day: 'Haftalık',
+        ruleType: 'Esnek Boş Gün Esnetmesi',
+        description: desc
+      });
+    }
+  });
+
+  return relaxedRules;
+};
+
+// 🚨 CANLI İHLAL VE ÇAKIŞMA DENETİM MOTORU
+// Manuel sürükle-bırak, ders taşıma veya silme yapıldığında anında çalışarak
+// dağıtım motorunun "İhlaller ve Raporlar" panelini dinamik olarak günceller.
+export const calculateLiveViolations = (timetable, teachers = [], classrooms = [], settings = {}, hardPrefs = {}) => {
+  const violations = [];
+  if (!timetable || Object.keys(timetable).length === 0) return violations;
+
+  const days = settings?.days || ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"];
+
+  // 1. Tablodaki yerleşimleri tara (Öğretmen ve Sınıf çakışmaları, kapalı saatler)
   const teacherBusy = {}; // tId -> { [day]: [ { period, classId, className, subject } ] }
   (teachers || []).forEach(t => {
     teacherBusy[t.id] = {};
@@ -472,17 +668,11 @@ export const calculateLiveViolations = (timetable, teachers = [], classrooms = [
     });
   });
 
-  // 3. Öğretmen bazlı ihlal denetimi (Boşluk sınırı, asgari ders saati, çakışma, kapalı saat)
+  // 2. Öğretmen bazlı çakışma ve kapalı saat ihlalleri
   (teachers || []).forEach(t => {
-    const load = teacherLoads[t.id] || 0;
-    const isExempt = t.isExempt === true || (load <= 8 && load > 0);
-    const isPartTime = t.isPartTime || load <= 12;
-
-    const hours = {};
     days.forEach(d => {
       const assigned = teacherBusy[t.id]?.[d] || [];
 
-      // Öğretmen çakışması (aynı saatte birden fazla sınıfta ders)
       const periodMap = {};
       assigned.forEach(item => {
         if (!periodMap[item.period]) periodMap[item.period] = [];
@@ -494,38 +684,19 @@ export const calculateLiveViolations = (timetable, teachers = [], classrooms = [
         }
       });
 
-      // Kapalı saat ihlali
       const closed = t.unavailable?.[d] || [];
       assigned.forEach(item => {
         if (closed.includes(item.period)) {
           violations.push(`⛔ Kapalı Saat İhlali: ${t.name} – ${d} ${item.period}. saatte kapalı olmasına rağmen ${item.className} sınıfında dersi var.`);
         }
       });
-
-      // Boşluk (pencere) kontrolü
-      const pList = assigned.map(a => a.period).sort((a, b) => a - b);
-      const uniquePeriods = Array.from(new Set(pList));
-      hours[d] = uniquePeriods.length;
-
-      if (uniquePeriods.length > 1) {
-        const span = uniquePeriods[uniquePeriods.length - 1] - uniquePeriods[0] + 1;
-        const g = span - uniquePeriods.length;
-        if (!isExempt && !isPartTime && enforceGaps && g > maxGaps) {
-          violations.push(`${t.name} – ${d}: ${g} boşluk (sınır ${maxGaps}).`);
-        }
-      }
     });
+  });
 
-    // Günlük asgari ders saati kontrolü
-    if (!isExempt && !isPartTime && enforceBalance && load > 0) {
-      const activeDays = days.filter(d => (hours[d] || 0) > 0);
-      const adaptiveMin = Math.min(minDaily, load);
-      activeDays.forEach(d => {
-        if (hours[d] < adaptiveMin) {
-          violations.push(`${t.name} – ${d}: ${hours[d]} saat (asgari ${adaptiveMin}).`);
-        }
-      });
-    }
+  // 3. Esnetilen kuralları da uyarı listesine ekle
+  const relaxed = calculateLiveRelaxedRules(timetable, teachers, classrooms, settings, hardPrefs);
+  relaxed.forEach(r => {
+    violations.push(`🔧 ${r.ruleType}: ${r.description}`);
   });
 
   return violations;
@@ -818,6 +989,7 @@ export const useAppStore = create(
         const { teachers, classrooms, settings, hardPrefs } = get();
         const liveMetrics = calculateLiveMetrics(newTimetable, teachers, classrooms, settings);
         const liveViolations = calculateLiveViolations(newTimetable, teachers, classrooms, settings, hardPrefs);
+        const liveRelaxed = calculateLiveRelaxedRules(newTimetable, teachers, classrooms, settings, hardPrefs);
         set((state) => ({
           timetable: newTimetable,
           generateResult: state.generateResult ? {
@@ -827,6 +999,8 @@ export const useAppStore = create(
             metrics: {
               ...(state.generateResult.metrics || {}),
               ...liveMetrics,
+              relaxedRules: liveRelaxed,
+              relaxedRulesCount: liveRelaxed.length,
               violations: liveViolations
             }
           } : {
@@ -835,6 +1009,8 @@ export const useAppStore = create(
             warnings: liveViolations,
             metrics: {
               ...liveMetrics,
+              relaxedRules: liveRelaxed,
+              relaxedRulesCount: liveRelaxed.length,
               violations: liveViolations
             }
           }
@@ -860,6 +1036,7 @@ export const useAppStore = create(
         const { timetable, teachers, classrooms, settings, hardPrefs } = get();
         const liveMetrics = calculateLiveMetrics(timetable, teachers, classrooms, settings);
         const liveViolations = calculateLiveViolations(timetable, teachers, classrooms, settings, hardPrefs);
+        const liveRelaxed = calculateLiveRelaxedRules(timetable, teachers, classrooms, settings, hardPrefs);
         set((state) => ({
           generateResult: state.generateResult ? {
             ...state.generateResult,
@@ -868,6 +1045,8 @@ export const useAppStore = create(
             metrics: {
               ...(state.generateResult.metrics || {}),
               ...liveMetrics,
+              relaxedRules: liveRelaxed,
+              relaxedRulesCount: liveRelaxed.length,
               violations: liveViolations
             }
           } : {
@@ -876,6 +1055,8 @@ export const useAppStore = create(
             warnings: liveViolations,
             metrics: {
               ...liveMetrics,
+              relaxedRules: liveRelaxed,
+              relaxedRulesCount: liveRelaxed.length,
               violations: liveViolations
             }
           }
@@ -995,36 +1176,122 @@ export const useAppStore = create(
       // 🎓 OKUL ORTAK SINAV TAKVİMİ MODÜLÜ
       // ==========================================
       examSettings: {
-        startDate: "2025-11-03",
-        endDate: "2025-11-14",
-        selectedDates: ["2025-11-03", "2025-11-04", "2025-11-05", "2025-11-06", "2025-11-07", "2025-11-10", "2025-11-11", "2025-11-12", "2025-11-13", "2025-11-14"],
+        startDate: "2026-11-02",
+        endDate: "2026-11-13",
+        selectedDates: ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13"],
         examSlots: [3, 5],
-        grades: ["9", "10", "11-SAY", "11-EA", "12"]
+        grades: ["9", "10", "11-SAY", "11-EA", "12"],
+        schoolYear: "2026-2027",
+        semester: "1",
+        examNo: "1"
       },
       examSubjectsByGrade: DEFAULT_EXAM_SUBJECTS,
       examSchedule: null,
+      examPlacements: null,
       examResult: null,
       examSupervisors: null,
       examSupervisorResult: null,
 
       updateExamSettings: (newSettings) => set((state) => ({ examSettings: { ...state.examSettings, ...newSettings } })),
       setExamSubjectsByGrade: (newSubjects) => set({ examSubjectsByGrade: newSubjects }),
+      setExamPlacements: (newPlacements) => set((state) => {
+        const grades = state.examSettings?.grades || ["9", "10", "11-SAY", "11-EA", "12"];
+        const dates = state.examSettings?.selectedDates || [];
+        const updatedSchedule = buildScheduleFromPlacements(newPlacements, grades, dates, state.examSubjectsByGrade);
+        return {
+          examPlacements: newPlacements,
+          examSchedule: updatedSchedule
+        };
+      }),
       toggleExamSubjectMajor: (grade, subjectId) => set((state) => {
         const current = state.examSubjectsByGrade[grade] || [];
+        const targetSub = current.find(s => s.id === subjectId);
+        if (!targetSub) return state;
+
+        const nextIsMajor = !targetSub.isMajor;
+        const targetNorm = (targetSub.name || '').trim().toLocaleLowerCase('tr-TR');
+
+        const updatedByGrade = {};
+        Object.entries(state.examSubjectsByGrade || {}).forEach(([g, list]) => {
+          updatedByGrade[g] = (list || []).map(s => {
+            const sNorm = (s.name || '').trim().toLocaleLowerCase('tr-TR');
+            if (s.id === subjectId || (targetNorm && sNorm === targetNorm)) {
+              return { ...s, isMajor: nextIsMajor };
+            }
+            return s;
+          });
+        });
+
         return {
-          examSubjectsByGrade: {
-            ...state.examSubjectsByGrade,
-            [grade]: current.map(s => s.id === subjectId ? { ...s, isMajor: !s.isMajor } : s)
-          }
+          examSubjectsByGrade: updatedByGrade
+        };
+      }),
+      updateExamSubjectMebConfig: (grade, subjectId, config = {}, applyToAllGrades = false) => set((state) => {
+        const currentList = state.examSubjectsByGrade?.[grade] || [];
+        const targetSub = currentList.find(s => s.id === subjectId);
+        if (!targetSub) return state;
+
+        const targetNorm = (targetSub.name || '').trim().toLocaleLowerCase('tr-TR');
+        const sanitizePatch = (sub) => {
+          const nextIsMeb = config.isMebExam !== undefined ? Boolean(config.isMebExam) : Boolean(sub.isMebExam);
+          const nextDate = config.mebDate !== undefined ? (config.mebDate || null) : (sub.mebDate || null);
+          const nextSlot = config.mebSlot !== undefined
+            ? (config.mebSlot ? Number(config.mebSlot) : null)
+            : (sub.mebSlot ? Number(sub.mebSlot) : null);
+
+          return {
+            ...sub,
+            isMebExam: nextIsMeb,
+            mebDate: nextIsMeb ? nextDate : null,
+            mebSlot: nextIsMeb ? nextSlot : null
+          };
+        };
+
+        const updatedByGrade = {};
+        Object.entries(state.examSubjectsByGrade || {}).forEach(([g, list]) => {
+          updatedByGrade[g] = (list || []).map(s => {
+            const sNorm = (s.name || '').trim().toLocaleLowerCase('tr-TR');
+            if (g === grade && s.id === subjectId) {
+              return sanitizePatch(s);
+            }
+            if (applyToAllGrades && targetNorm && sNorm === targetNorm) {
+              return sanitizePatch(s);
+            }
+            return s;
+          });
+        });
+
+        return {
+          examSubjectsByGrade: updatedByGrade
         };
       }),
       addExamSubject: (grade, subject) => set((state) => {
         const current = state.examSubjectsByGrade[grade] || [];
+        const subNorm = (subject.name || '').trim().toLocaleLowerCase('tr-TR');
+
+        // Aynı kademede zaten varsa tekrar ekleme
+        if (current.some(s => (s.name || '').trim().toLocaleLowerCase('tr-TR') === subNorm)) {
+          return state;
+        }
+
+        const updatedByGrade = {};
+        Object.entries(state.examSubjectsByGrade || {}).forEach(([g, list]) => {
+          updatedByGrade[g] = (list || []).map(s => {
+            const sNorm = (s.name || '').trim().toLocaleLowerCase('tr-TR');
+            if (subNorm && sNorm === subNorm) {
+              return { ...s, isMajor: !!subject.isMajor };
+            }
+            return s;
+          });
+        });
+
+        updatedByGrade[grade] = [
+          ...(updatedByGrade[grade] || []),
+          { ...subject, id: newId('es'), isMajor: !!subject.isMajor }
+        ];
+
         return {
-          examSubjectsByGrade: {
-            ...state.examSubjectsByGrade,
-            [grade]: [...current, { ...subject, id: newId('es') }]
-          }
+          examSubjectsByGrade: updatedByGrade
         };
       }),
       deleteExamSubject: (grade, subjectId) => set((state) => {
@@ -1037,17 +1304,22 @@ export const useAppStore = create(
         };
       }),
       generateExamSchedule: () => {
-        const { examSettings, examSubjectsByGrade } = get();
+        const { examSettings, examSubjectsByGrade, teachers, classrooms, timetable, settings } = get();
         const res = solveExamSchedule({
           startDate: examSettings.startDate,
           endDate: examSettings.endDate,
           selectedDates: examSettings.selectedDates,
           examSlots: examSettings.examSlots,
           grades: examSettings.grades,
-          subjectsByGrade: examSubjectsByGrade
+          subjectsByGrade: examSubjectsByGrade,
+          teachers: teachers || [],
+          classrooms: classrooms || [],
+          timetable: timetable || {},
+          periodsPerDay: settings?.periodsPerDay || 8
         });
         set({
           examSchedule: res.schedule,
+          examPlacements: res.placements,
           examResult: {
             success: res.success,
             unassigned: res.unassigned,
@@ -1087,7 +1359,7 @@ export const useAppStore = create(
         current[date][slot][classroomId] = teacherId;
         return { examSupervisors: current };
       }),
-      clearExamSchedule: () => set({ examSchedule: null, examResult: null, examSupervisors: null, examSupervisorResult: null }),
+      clearExamSchedule: () => set({ examSchedule: null, examPlacements: null, examResult: null, examSupervisors: null, examSupervisorResult: null }),
       clearExamSupervisors: () => set({ examSupervisors: null, examSupervisorResult: null })
 
     }),
@@ -1112,6 +1384,7 @@ export const useAppStore = create(
         examSettings: state.examSettings,
         examSubjectsByGrade: state.examSubjectsByGrade,
         examSchedule: state.examSchedule,
+        examPlacements: state.examPlacements,
         examSupervisors: state.examSupervisors
       })
     }

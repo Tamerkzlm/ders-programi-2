@@ -63,12 +63,6 @@ export default function Teachers() {
   const [name, setName] = useState('');
   const [branch, setBranch] = useState('');
   const [selectedSubjects, setSelectedSubjects] = useState([]); 
-  const [isExempt, setIsExempt] = useState(false);
-  const [isAdministrator, setIsAdministrator] = useState(false);
-  const [priorityFullDay, setPriorityFullDay] = useState('');
-  const [fillLateHours, setFillLateHours] = useState(false);
-  const [freeDayPref, setFreeDayPref] = useState('none');
-  const [freeHalfPref, setFreeHalfPref] = useState('none');
   
   // Filtre durumları
   const [searchTerm, setSearchTerm] = useState('');
@@ -82,6 +76,17 @@ export default function Teachers() {
   const numPeriods = settings?.periodsPerDay || 8;
   const periodsArray = Array.from({ length: numPeriods }, (_, i) => i + 1);
   const daysArray = settings?.days || ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'];
+
+  // Kısıt modalında seçili öğretmenin güncel store verisini canlı takip et
+  const activeScheduleTeacher = useMemo(() => {
+    if (!selectedTeacherForSchedule) return null;
+    return teachers.find(t => t.id === selectedTeacherForSchedule.id) || selectedTeacherForSchedule;
+  }, [teachers, selectedTeacherForSchedule]);
+
+  const openScheduleModal = (teacher) => {
+    setSelectedTeacherForSchedule(teacher);
+    setIsScheduleModalOpen(true);
+  };
 
   const globalSubjects = useMemo(() => {
     const subSet = new Set();
@@ -173,24 +178,11 @@ export default function Teachers() {
       setName(teacher.name);
       setBranch(teacher.branch || '');
       setSelectedSubjects(teacher.subjects || (teacher.branch ? [teacher.branch] : []));
-      setIsExempt(teacher.isExempt || false);
-      setIsAdministrator(teacher.isAdministrator || false);
-      setPriorityFullDay(teacher.priorityFullDay || '');
-      setFillLateHours(teacher.fillLateHours || false);
-      const floating = teacher.floatingConstraints || {};
-      setFreeDayPref(floating.freeDayPreference || 'none');
-      setFreeHalfPref(floating.freeHalfDayPreference || 'none');
     } else {
       setEditingTeacher(null);
       setName('');
       setBranch('');
       setSelectedSubjects([]);
-      setIsExempt(false);
-      setIsAdministrator(false);
-      setPriorityFullDay('');
-      setFillLateHours(false);
-      setFreeDayPref('none');
-      setFreeHalfPref('none');
     }
     setSubjectSearchQuery('');
     setPropagateToPeers(false);
@@ -205,22 +197,14 @@ export default function Teachers() {
     }
   };
 
-  const handleSave = (e) => {
-    e.preventDefault();
+  const handleSave = (e, openConstraintsAfter = false) => {
+    if (e) e.preventDefault();
     if (!name.trim()) return;
 
     const teacherPayload = { 
       name, 
       branch, 
-      subjects: selectedSubjects, 
-      isExempt,
-      isAdministrator,
-      priorityFullDay: priorityFullDay || null,
-      fillLateHours: Boolean(fillLateHours),
-      floatingConstraints: {
-        freeDayPreference: freeDayPref,
-        freeHalfDayPreference: freeHalfPref
-      }
+      subjects: selectedSubjects
     };
 
     if (editingTeacher) {
@@ -231,10 +215,25 @@ export default function Teachers() {
           updateTeacher(st.id, { subjects: selectedSubjects });
         });
       }
+      setIsModalOpen(false);
+      if (openConstraintsAfter) {
+        openScheduleModal({ ...editingTeacher, ...teacherPayload });
+      }
     } else {
-      addTeacher({ ...teacherPayload, unavailable: {} });
+      addTeacher({
+        ...teacherPayload,
+        isExempt: false,
+        isAdministrator: false,
+        priorityFullDay: null,
+        fillLateHours: false,
+        floatingConstraints: {
+          freeDayPreference: 'none',
+          freeHalfDayPreference: 'none'
+        },
+        unavailable: {}
+      });
+      setIsModalOpen(false);
     }
-    setIsModalOpen(false);
   };
 
   const handleDelete = (id, tName) => {
@@ -670,9 +669,14 @@ export default function Teachers() {
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h3 className="font-extrabold text-slate-800 text-sm tracking-tight">{t.name}</h3>
                         {t.isAdministrator && (
-                          <span className="bg-purple-100 text-purple-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="Okul İdarecisi">
+                          <button
+                            type="button"
+                            onClick={() => openScheduleModal(t)}
+                            className="bg-purple-100 hover:bg-purple-200 text-purple-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Okul İdarecisi (Düzenlemek için tıklayın)"
+                          >
                             <Landmark size={10} className="text-purple-700" /> İdareci
-                          </span>
+                          </button>
                         )}
                         {isFullyPinned && (
                           <span className="bg-amber-100 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="Öğretmenin tüm ders programı kilitli">
@@ -680,34 +684,64 @@ export default function Teachers() {
                           </span>
                         )}
                         {(t.isExempt || (daysArray.filter(d => (t.unavailable?.[d] || []).length === numPeriods).length >= 3 && totalAssignedHours < 17 && totalAssignedHours > 0)) && !t.isAdministrator && (
-                          <span className="bg-amber-100 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="İstisna öğretmen: 1-2 gün gelen / <17 saat dersi olan; sert kısıt kurallarından muaftır">
+                          <button
+                            type="button"
+                            onClick={() => openScheduleModal(t)}
+                            className="bg-amber-100 hover:bg-amber-200 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors"
+                            title="İstisna öğretmen: 1-2 gün gelen / <17 saat dersi olan; sert kısıt kurallarından muaftır (Düzenlemek için tıklayın)"
+                          >
                             <ShieldAlert size={10} className="text-amber-700" /> İstisna
-                          </span>
+                          </button>
                         )}
                         {t.priorityFullDay && (
-                          <span className="bg-indigo-100 text-indigo-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title={`${t.priorityFullDay} günü tam doldurulacak${t.fillLateHours ? ', son saatler kesin dolu olsun' : ''}`}>
+                          <button
+                            type="button"
+                            onClick={() => openScheduleModal(t)}
+                            className="bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors"
+                            title={`${t.priorityFullDay} günü tam doldurulacak${t.fillLateHours ? ', son saatler kesin dolu olsun' : ''} (Düzenlemek için tıklayın)`}
+                          >
                             <CalendarDays size={10} className="text-indigo-700" /> 📌 {t.priorityFullDay.slice(0, 3)} {t.fillLateHours ? 'Tam + Son Sa.' : 'Tam Dolu'}
-                          </span>
+                          </button>
                         )}
                         {t.floatingConstraints?.freeDayPreference === 'floating_1_day' && (
-                          <span className="bg-cyan-100 text-cyan-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="Haftada 1 gün kayan boş gün (solver en uygun güne yerleştirir)">
+                          <button
+                            type="button"
+                            onClick={() => openScheduleModal(t)}
+                            className="bg-cyan-100 hover:bg-cyan-200 text-cyan-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Haftada 1 gün kayan boş gün - Günü fark etmez (Düzenlemek için tıklayın)"
+                          >
                             <Waves size={10} className="text-cyan-700" /> 1 Gün Kayan Boş
-                          </span>
+                          </button>
                         )}
                         {t.floatingConstraints?.freeDayPreference === 'floating_2_days' && (
-                          <span className="bg-cyan-100 text-cyan-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="Haftada 2 gün kayan boş gün">
+                          <button
+                            type="button"
+                            onClick={() => openScheduleModal(t)}
+                            className="bg-cyan-100 hover:bg-cyan-200 text-cyan-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Haftada 2 gün kayan boş gün - Günü fark etmez (Düzenlemek için tıklayın)"
+                          >
                             <Waves size={10} className="text-cyan-700" /> 2 Gün Kayan Boş
-                          </span>
+                          </button>
                         )}
                         {t.floatingConstraints?.freeHalfDayPreference === 'any_afternoon' && (
-                          <span className="bg-amber-100 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="Haftada 1 gün öğleden sonra serbest">
+                          <button
+                            type="button"
+                            onClick={() => openScheduleModal(t)}
+                            className="bg-amber-100 hover:bg-amber-200 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Haftada 1 gün öğleden sonra serbest - Günü fark etmez (Düzenlemek için tıklayın)"
+                          >
                             <Sun size={10} className="text-amber-700" /> Kayan Öğleden Sonra
-                          </span>
+                          </button>
                         )}
                         {t.floatingConstraints?.freeHalfDayPreference === 'any_morning' && (
-                          <span className="bg-sky-100 text-sky-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1" title="Haftada 1 gün sabah serbest">
+                          <button
+                            type="button"
+                            onClick={() => openScheduleModal(t)}
+                            className="bg-sky-100 hover:bg-sky-200 text-sky-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Haftada 1 gün sabah serbest - Günü fark etmez (Düzenlemek için tıklayın)"
+                          >
                             <Sun size={10} className="text-sky-700" /> Kayan Sabah
-                          </span>
+                          </button>
                         )}
                       </div>
                       <span className="inline-block bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-md mt-1">
@@ -720,7 +754,7 @@ export default function Teachers() {
                         type="button"
                         onClick={() => openModal(t)} 
                         className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
-                        title="Öğretmeni Düzenle"
+                        title="Kimlik, Branş ve Ders Yetkilerini Düzenle"
                       >
                         <Edit2 size={14} />
                       </button>
@@ -766,21 +800,28 @@ export default function Teachers() {
                   <div className="pt-2 border-t border-slate-100 space-y-1.5 mt-2">
                     <div className="flex items-center justify-between text-[10px] font-bold text-slate-500">
                       <span className="flex items-center gap-1">
-                        <Calendar size={11} className="text-indigo-600" /> Boş Gün Seçimi (Hızlı Tıkla):
+                        <Calendar size={11} className="text-indigo-600" /> Sabit Boş Gün (Hızlı Tıkla):
                       </span>
                       {(() => {
                         const fullOffDays = daysArray.filter(d => (t.unavailable?.[d] || []).length === numPeriods);
-                        return fullOffDays.length > 0 ? (
-                          <span className="text-rose-600 font-black">{fullOffDays.join(', ')} BOŞ</span>
-                        ) : (
-                          <span className="text-slate-400 font-normal">Boş gün yok</span>
-                        );
+                        const fDay = t.floatingConstraints?.freeDayPreference;
+                        if (fullOffDays.length > 0) {
+                          return <span className="text-rose-600 font-black">{fullOffDays.join(', ')} BOŞ</span>;
+                        }
+                        if (fDay === 'floating_1_day') {
+                          return <span className="text-cyan-700 font-black">🌊 1 Gün Kayan Boş</span>;
+                        }
+                        if (fDay === 'floating_2_days') {
+                          return <span className="text-cyan-700 font-black">🌊 2 Gün Kayan Boş</span>;
+                        }
+                        return <span className="text-slate-400 font-normal">Boş gün yok</span>;
                       })()}
                     </div>
                     <div className="grid grid-cols-5 gap-1">
                       {daysArray.map(day => {
                         const isDayOff = (t.unavailable?.[day] || []).length === numPeriods;
                         const isPartiallyClosed = (t.unavailable?.[day] || []).length > 0 && !isDayOff;
+                        const isPriorityDay = t.priorityFullDay === day;
                         const shortDay = day.slice(0, 3);
 
                         return (
@@ -793,13 +834,15 @@ export default function Teachers() {
                                 ? 'bg-rose-500 text-white border-rose-600 shadow-xs ring-1 ring-rose-400 scale-[1.02]'
                                 : isPartiallyClosed
                                   ? 'bg-amber-100 text-amber-900 border-amber-300'
-                                  : 'bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 border-slate-200'
+                                  : isPriorityDay
+                                    ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                                    : 'bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 border-slate-200'
                             }`}
                             title={`${day} gününü boş gün yap veya aç`}
                           >
                             <span>{shortDay}</span>
                             <span className="text-[8px] font-bold">
-                              {isDayOff ? 'BOŞ' : isPartiallyClosed ? `${t.unavailable[day].length}k` : 'Açık'}
+                              {isDayOff ? 'BOŞ' : isPartiallyClosed ? `${t.unavailable[day].length}k` : isPriorityDay ? '📌Dolu' : 'Açık'}
                             </span>
                           </button>
                         );
@@ -811,19 +854,40 @@ export default function Teachers() {
                 {/* Alt Aksiyon Butonları */}
                 <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px] gap-2">
                   <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => { setSelectedTeacherForSchedule(t); setIsScheduleModalOpen(true); }}
-                      className={`font-bold flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer text-[10px] flex-1 truncate ${
-                        closedSlotsCount > 0 
-                          ? 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100' 
-                          : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
-                      }`}
-                      title="Detaylı saat bazlı müsaitlik ve kapalı saatleri düzenle"
-                    >
-                      <Clock size={11} className={closedSlotsCount > 0 ? 'text-rose-600' : 'text-indigo-600'} />
-                      <span className="truncate">{closedSlotsCount > 0 ? `${closedSlotsCount} sa Kapalı (Düzenle)` : 'Detaylı Saat Kısıtı Belirle'}</span>
-                    </button>
+                    {(() => {
+                      const hasSpecialPref = Boolean(
+                        t.isAdministrator ||
+                        t.isExempt ||
+                        t.priorityFullDay ||
+                        (t.floatingConstraints?.freeDayPreference && t.floatingConstraints.freeDayPreference !== 'none') ||
+                        (t.floatingConstraints?.freeHalfDayPreference && t.floatingConstraints.freeHalfDayPreference !== 'none')
+                      );
+                      const hasAnyConstraint = closedSlotsCount > 0 || hasSpecialPref;
+
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => openScheduleModal(t)}
+                          className={`font-bold flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer text-[10px] flex-1 truncate ${
+                            closedSlotsCount > 0 
+                              ? 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100' 
+                              : hasSpecialPref
+                                ? 'bg-cyan-50 text-cyan-900 border border-cyan-200 hover:bg-cyan-100'
+                                : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
+                          }`}
+                          title="Öğretmenin tüm kısıtlarını (kapalı saatler, boş gün, idareci, istisna, tam gün doluluk) tek ekranda düzenle"
+                        >
+                          <Clock size={11} className={closedSlotsCount > 0 ? 'text-rose-600 shrink-0' : hasSpecialPref ? 'text-cyan-700 shrink-0' : 'text-indigo-600 shrink-0'} />
+                          <span className="truncate">
+                            {closedSlotsCount > 0
+                              ? `Kısıt & Tercihler (${closedSlotsCount} sa Kapalı)`
+                              : hasAnyConstraint
+                                ? 'Kısıt & Tercihler (Aktif)'
+                                : 'Kısıt, Boş Gün & Tercihler'}
+                          </span>
+                        </button>
+                      );
+                    })()}
 
                     {tAssignedSlots > 0 && (
                       <button
@@ -865,20 +929,25 @@ export default function Teachers() {
         </div>
       )}
 
-      {/* MODAL 1: ÖĞRETMEN DÜZENLEME / EKLEME */}
+      {/* MODAL 1: ÖĞRETMEN KİMLİK, BRANŞ & DERS YETKİLERİ DÜZENLEME / EKLEME */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/70 shrink-0">
-              <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                {editingTeacher ? `${editingTeacher.name} - Bilgileri Düzenle` : 'Yeni Öğretmen Kaydı'}
-              </h2>
-              <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+              <div>
+                <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                  {editingTeacher ? `${editingTeacher.name} - Kimlik & Ders Yetkileri` : 'Yeni Öğretmen Kaydı'}
+                </h2>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Öğretmen adı, ana branşı ve girebileceği ders yetkilerini tanımlayın
+                </p>
+              </div>
+              <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer p-1 rounded-lg hover:bg-slate-200/50">
                 <X size={16} />
               </button>
             </div>
             
-            <form onSubmit={handleSave} className="p-5 space-y-4 text-xs overflow-y-auto flex-1">
+            <form onSubmit={(e) => handleSave(e, false)} className="p-4 space-y-4 text-xs overflow-y-auto flex-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="font-bold text-slate-600">Adı Soyadı</label>
@@ -904,132 +973,46 @@ export default function Teachers() {
                 </div>
               </div>
 
-              {/* 1. İSTİSNA ÖĞRETMEN SEÇENEĞİ */}
-              <div className="bg-amber-50/70 border border-amber-200 p-3.5 rounded-xl flex items-start gap-2.5">
-                <input 
-                  type="checkbox" 
-                  id="isExempt"
-                  checked={isExempt}
-                  onChange={(e) => setIsExempt(e.target.checked)}
-                  className="w-4 h-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer mt-0.5 shrink-0"
-                />
-                <label htmlFor="isExempt" className="cursor-pointer space-y-0.5">
-                  <span className="font-black text-amber-900 block text-[11px] flex items-center gap-1.5">
-                    <ShieldAlert size={13} className="text-amber-700" />
-                    İstisna Öğretmen (1-2 Gün Gelen / &lt;17 Saat Dersi Olan)
-                  </span>
-                  <span className="text-[10px] text-amber-700 block leading-tight">
-                    Bu öğretmenlere sert kısıtlar (bir sınıfa aynı gün 3 saat girmeme kuralı, günlük denge tavanı vb.) uygulanmaz. Dersleri okula geldiği 1-2 güne serbestçe toplanır.
-                  </span>
-                </label>
-              </div>
-
-              {/* 2. ÖNCELİKLİ TAM DOLDURULACAK GÜN & SON SAATLER */}
-              <div className="bg-indigo-50/50 border border-indigo-200/80 p-3.5 rounded-xl space-y-3">
-                <div className="space-y-1">
-                  <label className="font-black text-indigo-950 block text-[11px] flex items-center gap-1.5">
-                    <CalendarDays size={13} className="text-indigo-600" />
-                    Öncelikli Tam Doldurulacak Gün:
-                  </label>
-                  <select
-                    value={priorityFullDay}
-                    onChange={(e) => setPriorityFullDay(e.target.value)}
-                    className="w-full bg-white border border-indigo-200 rounded-xl p-2 text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 cursor-pointer"
+              {/* KISIT MERKEZİNE HIZLI GEÇİŞ KARTI */}
+              {editingTeacher && (
+                <div className="bg-indigo-50/70 border border-indigo-200/90 p-3 rounded-xl flex items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <div className="font-black text-indigo-950 text-[11px] flex items-center gap-1.5">
+                      <Calendar size={13} className="text-indigo-600 shrink-0" />
+                      <span>Kısıt, Boş Gün, İdareci & İstisna Ayarları</span>
+                    </div>
+                    <p className="text-[10px] text-indigo-800 leading-snug">
+                      İdareci, istisna, seçilen günün tam dolması, kayan boş gün ("fark etmez") ve kapalı saat ayarlarının tamamı Kısıt Ekranında birleştirilmiştir.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSave(null, true)}
+                    className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] px-3 py-2 rounded-xl shadow-xs cursor-pointer transition-all flex items-center gap-1"
                   >
-                    <option value="">Seçilmedi (Standart Dengeli Dağıtım)</option>
-                    {daysArray.map((d) => (
-                      <option key={d} value={d}>📌 {d} Günü Tam Doldurulsun</option>
-                    ))}
-                  </select>
-                  <span className="text-[10px] text-indigo-700 block leading-tight mt-1">
-                    Örn: Tamer öğretmenin Pazartesi gününe olabildiğince çok ders konulmasını sağlar.
-                  </span>
+                    <span>Kısıt Ekranını Aç</span>
+                    <ArrowRight size={12} />
+                  </button>
                 </div>
-
-                {priorityFullDay && (
-                  <div className="pt-2 border-t border-indigo-100 flex items-start gap-2.5">
-                    <input 
-                      type="checkbox" 
-                      id="fillLateHours" 
-                      checked={fillLateHours}
-                      onChange={(e) => setFillLateHours(e.target.checked)}
-                      className="w-4 h-4 text-indigo-600 rounded border-indigo-300 focus:ring-indigo-500 cursor-pointer mt-0.5 shrink-0"
-                    />
-                    <label htmlFor="fillLateHours" className="cursor-pointer space-y-0.5">
-                      <span className="font-bold text-indigo-950 block text-[11px]">
-                        Son Saatleri Kesin Dolu Olsun (7. ve 8. saatler)
-                      </span>
-                      <span className="text-[10px] text-indigo-700 block leading-tight">
-                        {priorityFullDay} günündeki dersler özellikle günün son saatlerine yerleştirilir.
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </div>
-
-              {/* 3. 🌊 ESNEK / KAYAN TERCİHLER ("Boş günüm ya da saatim fark etmez" diyen öğretmenler) */}
-              <div className="bg-cyan-50/60 border border-cyan-200/80 p-3.5 rounded-xl space-y-3">
-                <div className="flex items-center gap-1.5 text-[11px] font-black text-cyan-950">
-                  <Waves size={14} className="text-cyan-700" />
-                  <span>Esnek / Kayan Tercihler ("Fark Etmez" Diyenler)</span>
-                </div>
-                <p className="text-[10px] text-cyan-800 leading-tight">
-                  Öğretmen belirli bir gün yerine esnek tercih belirttiğinde, yapay zeka boşluğu okulun en az yoğun olduğu güne yerleştirir ve darboğazı önler.
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                  <div className="space-y-1">
-                    <label className="font-bold text-[10px] text-cyan-900 block">Kayan Boş Gün Tercihi:</label>
-                    <select
-                      value={freeDayPref}
-                      onChange={(e) => setFreeDayPref(e.target.value)}
-                      className="w-full bg-white border border-cyan-200 rounded-xl p-2 text-xs font-bold text-slate-800 outline-none focus:border-cyan-500 cursor-pointer"
-                    >
-                      <option value="none">Belirtilmedi (Standart Dağıtım)</option>
-                      <option value="floating_1_day">🌊 1 Gün Boş Olsun (Fark etmez)</option>
-                      <option value="floating_2_days">🌊 2 Gün Boş Olsun (Fark etmez)</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="font-bold text-[10px] text-cyan-900 block">Kayan Yarım Gün Tercihi:</label>
-                    <select
-                      value={freeHalfPref}
-                      onChange={(e) => setFreeHalfPref(e.target.value)}
-                      className="w-full bg-white border border-cyan-200 rounded-xl p-2 text-xs font-bold text-slate-800 outline-none focus:border-cyan-500 cursor-pointer"
-                    >
-                      <option value="none">Tercih Yok</option>
-                      <option value="any_afternoon">☀️ 1 Öğleden Sonra Boş (Fark etmez)</option>
-                      <option value="any_morning">🌅 1 Sabah Boş (Fark etmez)</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* 3. OKUL İDARECİSİ KUTUCUĞU */}
-              <div className="bg-purple-50/60 border border-purple-200 p-3 rounded-xl flex items-start gap-2.5">
-                <input 
-                  type="checkbox" 
-                  id="isAdministrator"
-                  checked={isAdministrator}
-                  onChange={(e) => setIsAdministrator(e.target.checked)}
-                  className="w-4 h-4 text-purple-600 rounded border-purple-300 focus:ring-purple-500 cursor-pointer mt-0.5 shrink-0"
-                />
-                <label htmlFor="isAdministrator" className="cursor-pointer space-y-0.5">
-                  <span className="font-black text-purple-900 block text-[11px] flex items-center gap-1">
-                    <Landmark size={12} className="text-purple-700" /> Okul İdarecisi Olarak Tanımla
-                  </span>
-                  <span className="text-[10px] text-purple-700 block leading-tight">İdarecilerin dersleri en son kalan boş saatlere yerleştirilir ve program dengesini zorlamaz.</span>
-                </label>
-              </div>
+              )}
 
               {/* DERS YETKİLERİ HAVUZU */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <label className="font-bold text-slate-700">Girebileceği Dersler (Yetki Havuzu)</label>
-                  <span className="text-[10px] text-slate-400">{selectedSubjects.length} ders seçildi</span>
+                  <span className="text-[10px] text-indigo-600 font-bold">{selectedSubjects.length} ders seçildi</span>
                 </div>
-                <div className="border border-slate-200 rounded-xl p-2.5 max-h-36 overflow-y-auto space-y-1 bg-slate-50">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
+                  <input
+                    type="text"
+                    placeholder="Ders ara..."
+                    value={subjectSearchQuery}
+                    onChange={(e) => setSubjectSearchQuery(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-[11px] text-slate-700 focus:outline-none focus:border-indigo-400"
+                  />
+                </div>
+                <div className="border border-slate-200 rounded-xl p-2 max-h-44 overflow-y-auto space-y-1 bg-slate-50">
                   {filteredGlobalSubjects.map((sub, sIdx) => {
                     const isChecked = selectedSubjects.includes(sub);
                     return (
@@ -1080,60 +1063,407 @@ export default function Teachers() {
         </div>
       )}
 
-      {/* MODAL 2: TAKVİM KISIT GİRİŞİ (AVAILABILITY GRID) */}
-      {isScheduleModalOpen && selectedTeacherForSchedule && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-3xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/70">
-              <div>
-                <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Haftalık Müsaitlik & Kapalı Saat Ayarları (Kısıtlar)</h2>
-                <p className="text-[11px] text-slate-500 mt-0.5">Öğretmen: <strong className="text-slate-800">{selectedTeacherForSchedule.name}</strong> ({selectedTeacherForSchedule.branch || 'Genel'})</p>
+      {/* MODAL 2: BİRLEŞTİRİLMİŞ ÖĞRETMEN KISIT, BOŞ GÜN VE TERCİH MERKEZİ */}
+      {isScheduleModalOpen && activeScheduleTeacher && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-6xl w-full max-h-[94vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* ÜST BAŞLIK (SABİT) */}
+            <div className="px-4 py-3 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2 bg-slate-50/90 shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black text-sm shrink-0 shadow-xs">
+                  {activeScheduleTeacher.name?.charAt(0) || 'Ö'}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-sm font-black text-slate-900 truncate">{activeScheduleTeacher.name}</h2>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800">
+                      {activeScheduleTeacher.branch || 'Genel'}
+                    </span>
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-slate-200/80 text-slate-700">
+                      Ders Yükü: {getTeacherLoad(activeScheduleTeacher.id)} Saat
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    İdareci, istisna, tam dolacak gün, kayan boşluk ("fark etmez") ve kapalı saat ayarlarının tümünü buradan yönetin
+                  </p>
+                </div>
               </div>
-              <button onClick={() => setIsScheduleModalOpen(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-                <X size={18} />
-              </button>
-            </div>
 
-            <div className="bg-indigo-50/70 border-b border-indigo-100 px-4 py-2.5 text-[11px] text-indigo-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="font-bold">💡 Bilgi:</span>
-                <span>Bu ekrandaki kutucuklar öğretmenin derse giremeyeceği <strong>sert kapalı saatleridir (kısıtlar)</strong>.</span>
-              </div>
-              <div className="text-[10px] text-cyan-900 font-bold bg-cyan-100/80 px-2.5 py-1 rounded-lg border border-cyan-200 flex items-center gap-1.5 shrink-0">
-                <Waves size={12} className="text-cyan-700" />
-                <span>"Günü fark etmez" diyenler için tüm günü kapatmak yerine Düzenle &gt; Kayan Tercihler seçeneğini kullanın.</span>
-              </div>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <AvailabilityGrid 
-                settings={settings} 
-                teacher={selectedTeacherForSchedule} 
-                onChange={(id, unavailable) => updateTeacher(id, { unavailable })} 
-                totalAssignedHours={getTeacherLoad(selectedTeacherForSchedule.id)}
-              />
-              <div className="flex justify-between items-center pt-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
-                    updateTeacher(selectedTeacherForSchedule.id, { unavailable: {} });
-                    setResetFeedbackMsg(`${selectedTeacherForSchedule.name} öğretmeninin tüm kapalı saatleri açıldı.`);
-                    setTimeout(() => setResetFeedbackMsg(''), 4000);
+                    setIsScheduleModalOpen(false);
+                    openModal(activeScheduleTeacher);
                   }}
-                  className="text-xs font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                  className="text-[11px] font-bold text-slate-600 hover:text-indigo-700 bg-white hover:bg-indigo-50 border border-slate-200 px-2.5 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Öğretmen adını, branşını ve ders yetkilerini düzenle"
                 >
-                  Bu Öğretmenin Tüm Saatlerini Aç
+                  <Edit2 size={12} />
+                  <span className="hidden sm:inline">Kimlik & Ders Yetkileri</span>
                 </button>
-
-                <button 
+                <button
                   type="button"
-                  onClick={() => setIsScheduleModalOpen(false)} 
-                  className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-6 py-2.5 rounded-xl cursor-pointer transition-all"
+                  onClick={() => setIsScheduleModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-200/60 cursor-pointer transition-colors"
                 >
-                  Kapat ve Kaydet
+                  <X size={18} />
                 </button>
               </div>
             </div>
+
+            {/* İÇERİK GÖVDESİ (2 SÜTUNLU, EKRANA SIĞAN KOMPAKT YAPI) */}
+            <div className="p-3.5 sm:p-4 overflow-y-auto flex-1 bg-slate-50/30">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
+                
+                {/* SOL SÜTUN (5 BİRİM): STATÜ, İSTİSNA, TAM DOLU GÜN VE KAYAN BOŞ GÜN TERCİHLERİ */}
+                <div className="lg:col-span-5 space-y-3">
+                  
+                  {/* 1. ÖZEL STATÜ VE MUAFİYET (İDARECİ & İSTİSNA) */}
+                  <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-2xs space-y-2">
+                    <div className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide flex items-center justify-between">
+                      <span>1. Özel Statü & Muafiyet</span>
+                      <span className="text-[9px] font-semibold text-slate-400 normal-case">Tıklayarak aktif/pasif yapın</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {/* İdareci Kartı */}
+                      <button
+                        type="button"
+                        onClick={() => updateTeacher(activeScheduleTeacher.id, { isAdministrator: !activeScheduleTeacher.isAdministrator })}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2 ${
+                          activeScheduleTeacher.isAdministrator
+                            ? 'bg-purple-50 border-purple-400 ring-1 ring-purple-300 shadow-2xs'
+                            : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded flex items-center justify-center mt-0.5 shrink-0 border ${
+                          activeScheduleTeacher.isAdministrator
+                            ? 'bg-purple-600 border-purple-600 text-white'
+                            : 'bg-white border-slate-300'
+                        }`}>
+                          {activeScheduleTeacher.isAdministrator && <Check size={11} />}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-black text-[11px] text-purple-950 flex items-center gap-1">
+                            <Landmark size={11} className="text-purple-700 shrink-0" />
+                            <span>Okul İdarecisi</span>
+                          </div>
+                          <p className="text-[9.5px] text-purple-800/90 leading-tight mt-0.5">
+                            Dersleri kalan boş saatlere esnek yerleştirilir, genel dengeyi zorlamaz.
+                          </p>
+                        </div>
+                      </button>
+
+                      {/* İstisna Öğretmen Kartı */}
+                      <button
+                        type="button"
+                        onClick={() => updateTeacher(activeScheduleTeacher.id, { isExempt: !activeScheduleTeacher.isExempt })}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2 ${
+                          activeScheduleTeacher.isExempt
+                            ? 'bg-amber-50 border-amber-400 ring-1 ring-amber-300 shadow-2xs'
+                            : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded flex items-center justify-center mt-0.5 shrink-0 border ${
+                          activeScheduleTeacher.isExempt
+                            ? 'bg-amber-600 border-amber-600 text-white'
+                            : 'bg-white border-slate-300'
+                        }`}>
+                          {activeScheduleTeacher.isExempt && <Check size={11} />}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-black text-[11px] text-amber-950 flex items-center gap-1">
+                            <ShieldAlert size={11} className="text-amber-700 shrink-0" />
+                            <span>İstisna Öğretmen</span>
+                          </div>
+                          <p className="text-[9.5px] text-amber-800/90 leading-tight mt-0.5">
+                            1-2 gün gelen / &lt;17 sa dersi olanlar; sert kısıtlardan (günlük sınır vb.) muaftır.
+                          </p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 2. BOŞ GÜNÜ TAM VEYA YARIM GÜN "FARK ETMEZ" (ESNEK / KAYAN TERCİHLER) */}
+                  <div className="bg-cyan-50/50 border border-cyan-200 rounded-2xl p-3 shadow-2xs space-y-2.5">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-cyan-950 flex items-center gap-1.5">
+                          <Waves size={13} className="text-cyan-700 shrink-0" />
+                          <span>2. Esnek Boş Gün / Yarım Gün ("Günü Fark Etmez")</span>
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-cyan-800 leading-snug mt-0.5">
+                        Öğretmen belirli bir gün şartı koşmadan boşluk istediğinde seçin. Yapay zeka okulun en rahat gününü boş bırakır.
+                      </p>
+                    </div>
+
+                    {/* Tam Boş Gün (Fark Etmez) Seçimi */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-extrabold text-cyan-900 block">
+                        Tam Boş Gün Tercihi (Hangi gün olduğu fark etmez):
+                      </label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {[
+                          { value: 'none', label: 'Yok (Standart)' },
+                          { value: 'floating_1_day', label: '🌊 1 Tam Gün Boş' },
+                          { value: 'floating_2_days', label: '🌊 2 Tam Gün Boş' }
+                        ].map(opt => {
+                          const currentVal = activeScheduleTeacher.floatingConstraints?.freeDayPreference || 'none';
+                          const isSelected = currentVal === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => updateTeacher(activeScheduleTeacher.id, {
+                                floatingConstraints: {
+                                  ...(activeScheduleTeacher.floatingConstraints || {}),
+                                  freeDayPreference: opt.value
+                                }
+                              })}
+                              className={`py-1.5 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer text-center ${
+                                isSelected
+                                  ? 'bg-cyan-700 text-white border-cyan-800 shadow-xs'
+                                  : 'bg-white text-cyan-900 border-cyan-200 hover:bg-cyan-100/60'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Yarım Gün Boşluk (Fark Etmez) Seçimi */}
+                    <div className="space-y-1 pt-1 border-t border-cyan-200/60">
+                      <label className="text-[10px] font-extrabold text-cyan-900 block">
+                        Yarım Gün Boşluk Tercihi (Hangi gün olduğu fark etmez):
+                      </label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {[
+                          { value: 'none', label: 'Yok' },
+                          { value: 'any_afternoon', label: '☀️ 1 Öğleden Sonra' },
+                          { value: 'any_morning', label: '🌅 1 Sabah Boş' }
+                        ].map(opt => {
+                          const currentVal = activeScheduleTeacher.floatingConstraints?.freeHalfDayPreference || 'none';
+                          const isSelected = currentVal === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => updateTeacher(activeScheduleTeacher.id, {
+                                floatingConstraints: {
+                                  ...(activeScheduleTeacher.floatingConstraints || {}),
+                                  freeHalfDayPreference: opt.value
+                                }
+                              })}
+                              className={`py-1.5 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer text-center ${
+                                isSelected
+                                  ? 'bg-cyan-700 text-white border-cyan-800 shadow-xs'
+                                  : 'bg-white text-cyan-900 border-cyan-200 hover:bg-cyan-100/60'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. SEÇİLEN BİR GÜNÜN TAM DOLMASI & SON SAATLER */}
+                  <div className="bg-indigo-50/50 border border-indigo-200 rounded-2xl p-3 shadow-2xs space-y-2.5">
+                    <div>
+                      <span className="text-[11px] font-black text-indigo-950 flex items-center gap-1.5">
+                        <CalendarDays size={13} className="text-indigo-600 shrink-0" />
+                        <span>3. Seçilen Bir Günün Tam Dolması (Öncelikli Gün)</span>
+                      </span>
+                      <p className="text-[10px] text-indigo-800 leading-snug mt-0.5">
+                        Seçilen güne olabildiğince çok ders toplanır; öğretmenin o günü tam dolu geçirmesi sağlanır.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-6 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => updateTeacher(activeScheduleTeacher.id, { priorityFullDay: null, fillLateHours: false })}
+                        className={`py-1.5 px-1 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                          !activeScheduleTeacher.priorityFullDay
+                            ? 'bg-slate-800 text-white border-slate-900 shadow-xs'
+                            : 'bg-white text-slate-600 border-indigo-200 hover:bg-indigo-100/50'
+                        }`}
+                      >
+                        Yok
+                      </button>
+                      {daysArray.map(d => {
+                        const isSelected = activeScheduleTeacher.priorityFullDay === d;
+                        return (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => {
+                              const nextDay = isSelected ? null : d;
+                              const updates = {
+                                priorityFullDay: nextDay,
+                                fillLateHours: nextDay ? Boolean(activeScheduleTeacher.fillLateHours) : false
+                              };
+                              // Eğer tam doldurulacak gün tamamen kapalıysa otomatik açalım ki çelişmesin
+                              if (nextDay && (activeScheduleTeacher.unavailable?.[nextDay] || []).length === numPeriods) {
+                                const nextUnavailable = { ...(activeScheduleTeacher.unavailable || {}) };
+                                delete nextUnavailable[nextDay];
+                                updates.unavailable = nextUnavailable;
+                              }
+                              updateTeacher(activeScheduleTeacher.id, updates);
+                            }}
+                            className={`py-1.5 px-1 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs ring-1 ring-indigo-400'
+                                : 'bg-white text-indigo-900 border-indigo-200 hover:bg-indigo-100/60'
+                            }`}
+                            title={`${d} gününü öncelikli tam dolu gün yap`}
+                          >
+                            {d.slice(0, 3)}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Son Saatler Kesin Dolu Olsun (7. ve 8. Saatler) */}
+                    <button
+                      type="button"
+                      disabled={!activeScheduleTeacher.priorityFullDay}
+                      onClick={() => {
+                        if (!activeScheduleTeacher.priorityFullDay) return;
+                        updateTeacher(activeScheduleTeacher.id, { fillLateHours: !activeScheduleTeacher.fillLateHours });
+                      }}
+                      className={`w-full p-2 rounded-xl border text-left transition-all flex items-center gap-2.5 ${
+                        !activeScheduleTeacher.priorityFullDay
+                          ? 'bg-slate-100/70 border-slate-200 opacity-60 cursor-not-allowed'
+                          : activeScheduleTeacher.fillLateHours
+                            ? 'bg-indigo-100/90 border-indigo-400 cursor-pointer shadow-2xs'
+                            : 'bg-white border-indigo-200 hover:bg-indigo-50 cursor-pointer'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
+                        activeScheduleTeacher.fillLateHours && activeScheduleTeacher.priorityFullDay
+                          ? 'bg-indigo-600 border-indigo-600 text-white'
+                          : 'bg-white border-slate-300'
+                      }`}>
+                        {activeScheduleTeacher.fillLateHours && activeScheduleTeacher.priorityFullDay && <Check size={11} />}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-[10.5px] text-indigo-950">
+                          Son Saatleri Kesin Dolu Olsun ({numPeriods - 1}. ve {numPeriods}. Saatler)
+                        </div>
+                        <div className="text-[9.5px] text-indigo-700 leading-tight">
+                          {activeScheduleTeacher.priorityFullDay
+                            ? `${activeScheduleTeacher.priorityFullDay} günündeki dersler özellikle son saatlere de yerleştirilir.`
+                            : 'Aktifleştirmek için yukarıdan tam doldurulacak bir gün seçin.'}
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* 4. HIZLI SABİT BOŞ GÜN SEÇİCİ (BELİRLİ BİR GÜNÜ TAMAMEN KAPATMA) */}
+                  <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-2xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black text-slate-800 flex items-center gap-1.5">
+                        <Calendar size={13} className="text-rose-600 shrink-0" />
+                        <span>4. Belirli Bir Günü Sabit Boş Gün Yap</span>
+                      </span>
+                      <span className="text-[9.5px] text-slate-400 font-semibold">Tam gün kapatır</span>
+                    </div>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {daysArray.map(day => {
+                        const isDayOff = (activeScheduleTeacher.unavailable?.[day] || []).length === numPeriods;
+                        const isPartiallyClosed = (activeScheduleTeacher.unavailable?.[day] || []).length > 0 && !isDayOff;
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => toggleDayOff(activeScheduleTeacher, day)}
+                            className={`py-1.5 px-1 rounded-xl border text-[10px] font-black transition-all cursor-pointer flex flex-col items-center justify-center ${
+                              isDayOff
+                                ? 'bg-rose-500 text-white border-rose-600 shadow-xs'
+                                : isPartiallyClosed
+                                  ? 'bg-amber-50 text-amber-900 border-amber-300'
+                                  : 'bg-slate-50 text-slate-700 hover:bg-rose-50 hover:text-rose-700 border-slate-200'
+                            }`}
+                          >
+                            <span>{day.slice(0, 3)}</span>
+                            <span className="text-[8.5px] font-bold opacity-90">
+                              {isDayOff ? 'BOŞ GÜN' : isPartiallyClosed ? `${activeScheduleTeacher.unavailable[day].length} Sa Kapalı` : 'Açık'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* SAĞ SÜTUN (7 BİRİM): SAAT BAZLI MÜSAİTLİK VE KAPALI SAAT MATRİSİ */}
+                <div className="lg:col-span-7">
+                  <AvailabilityGrid 
+                    settings={settings} 
+                    teacher={activeScheduleTeacher} 
+                    onChange={(id, unavailable) => updateTeacher(id, { unavailable })} 
+                    totalAssignedHours={getTeacherLoad(activeScheduleTeacher.id)}
+                  />
+                </div>
+
+              </div>
+            </div>
+
+            {/* ALT AKSİYON ÇUBUĞU (SABİT) */}
+            <div className="px-4 py-2.5 border-t border-slate-200 bg-slate-50 flex flex-wrap justify-between items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateTeacher(activeScheduleTeacher.id, { unavailable: {} });
+                    setResetFeedbackMsg(`${activeScheduleTeacher.name} öğretmeninin tüm kapalı saatleri açıldı.`);
+                    setTimeout(() => setResetFeedbackMsg(''), 3500);
+                  }}
+                  className="text-[11px] font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                >
+                  Kapalı Saatleri Aç
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateTeacher(activeScheduleTeacher.id, {
+                      unavailable: {},
+                      isExempt: false,
+                      isAdministrator: false,
+                      priorityFullDay: null,
+                      fillLateHours: false,
+                      floatingConstraints: {
+                        freeDayPreference: 'none',
+                        freeHalfDayPreference: 'none'
+                      }
+                    });
+                    setResetFeedbackMsg(`${activeScheduleTeacher.name} öğretmeninin tüm kısıt ve tercihleri sıfırlandı.`);
+                    setTimeout(() => setResetFeedbackMsg(''), 3500);
+                  }}
+                  className="text-[11px] font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 px-3 py-1.5 rounded-xl border border-slate-200 transition-colors cursor-pointer"
+                >
+                  Tüm Kısıt & Tercihleri Sıfırla
+                </button>
+              </div>
+
+              <button 
+                type="button"
+                onClick={() => setIsScheduleModalOpen(false)} 
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-6 py-2 rounded-xl cursor-pointer transition-all shadow-sm flex items-center gap-1.5"
+              >
+                <Check size={14} />
+                <span>Tamam (Kaydedildi)</span>
+              </button>
+            </div>
+
           </div>
         </div>
       )}

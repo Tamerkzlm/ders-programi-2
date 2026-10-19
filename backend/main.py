@@ -2,7 +2,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from models import SolveRequest
-from solver import solve
+from solver import solve, get_live_progress
 from validators import pre_flight_check
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
@@ -60,6 +60,11 @@ app.add_middleware(
 def health_check():
     """UptimeRobot ping endpoint to prevent cold starts."""
     return {"status": "ok", "message": "API is running"}
+
+@app.get("/solve/progress")
+def solve_progress():
+    """Çözüm esnasında anlık ilerleme, bulunan çözüm sayısı ve pencere düşüşünü döndürür."""
+    return get_live_progress()
 
 @app.post("/solve") # response_model kaldırıldı, hata vermesi engellendi
 async def solve_timetable(request: SolveRequest):
