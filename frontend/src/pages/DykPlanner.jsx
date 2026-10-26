@@ -45,6 +45,7 @@ import {
   placeUnassignedDykActivity,
   checkDykSlotAvailability,
   isTeacherFreeInDyk,
+  evaluateDykSwapOpportunity,
   getDykBlockTimes,
   formatDykScheduleHeaderTimes
 } from '../utils/dykEngine';
@@ -235,8 +236,8 @@ export default function DykPlanner() {
       });
     }
 
-    // 2. Eğer henüz dağıtım yapılmadıysa veya açıkta havuzdaysa, en azından DYK ders ataması olan öğretmenler
-    if (teacherIdsWithLessons.size === 0 && dykAssignments && dykAssignments.length > 0) {
+    // 2. DYK ders ataması olan tüm öğretmenler (havuzdakiler ve planlananlar dahil)
+    if (dykAssignments && dykAssignments.length > 0) {
       dykAssignments.forEach(a => {
         if (a.teacherId) teacherIdsWithLessons.add(a.teacherId);
       });
@@ -346,16 +347,101 @@ export default function DykPlanner() {
 
   const handleAddExternalTeacher = (e) => {
     e.preventDefault();
-    if (!externalTeacherName.trim()) return;
-    addTeacher({
-      name: externalTeacherName.trim().toUpperCase(),
+    const cleanName = externalTeacherName.trim().toUpperCase();
+    if (!cleanName) return;
+    const extId = `t_ext_${Date.now()}`;
+    const newT = addTeacher({
+      id: extId,
+      name: cleanName,
       branch: externalTeacherBranch,
       isExternalDyk: true,
       unavailable: {}
     });
+    const finalId = newT?.id || extId;
+    setDykTeacherAvailability(finalId, [...activeDays]);
     setExternalTeacherName("");
     setShowExternalTeacherModal(false);
-    showToast(`"${externalTeacherName.trim()}" öğretmeni sisteme eklendi.`);
+    showToast(`"${cleanName}" öğretmeni sisteme eklendi ve tüm günler aktif olarak DYK kadrosuna dahil edildi.`);
+  };
+
+  // 🎯 Öğretmen Branşı ile DYK Sınıfının Eşleşme Kontrolü
+  const isGroupMatchingTeacherBranch = (group, branch = '') => {
+    if (!branch) return true;
+    const b = (branch || '').toLowerCase();
+    const gb = (group.branch || '').toLowerCase();
+    const gn = (group.name || '').toLowerCase();
+    if (b.includes('mat')) return true;
+    if (b.includes('fiz') || b.includes('kim') || b.includes('bio') || b.includes('biy') || b.includes('fen')) {
+      return gb === 'say' || gn.includes('say') || (!gb.includes('ea') && !gn.includes('ea'));
+    }
+    if (b.includes('edeb') || b.includes('tdeb') || b.includes('tar') || b.includes('cog') || b.includes('coğ')) {
+      return gb === 'ea' || gn.includes('ea') || (!gb.includes('say') && !gn.includes('say'));
+    }
+    return true;
+  };
+
+  // 🎯 Öğretmen Kartından Doğrudan Sınıfa Atama / Kaldırma (Toggle)
+  const handleToggleTeacherGroupAssignment = (teacher, groupId, defaultBlocks = 1) => {
+    const existingAsg = dykAssignments.find(
+      a => a.groupId === groupId && a.teacherId === teacher.id
+    );
+    const grp = dykGroups.find(g => g.id === groupId);
+    const groupName = grp?.name || 'Sınıf';
+
+    if (existingAsg) {
+      deleteDykAssignment(existingAsg.id);
+      showToast(`"${teacher.name}" öğretmeninin "${groupName}" sınıfındaki ataması kaldırıldı.`);
+    } else {
+      const subjectToUse = resolveTeacherSubject(teacher);
+      addDykAssignment({
+        groupId,
+        teacherId: teacher.id,
+        teacherName: teacher.name,
+        subject: subjectToUse,
+        blocksPerWeek: Number(defaultBlocks) || 1
+      });
+      showToast(`✓ "${teacher.name}" (${subjectToUse}) "${groupName}" sınıfına atandı.`);
+    }
+  };
+
+  // ⚡ Öğretmen Kartından Tüm Uygun Sınıflara Toplu Atama
+  const handleAssignTeacherToAllMatchingGroups = (teacher) => {
+    const matchingGroups = dykGroups.filter(g => isGroupMatchingTeacherBranch(g, teacher.branch));
+    if (matchingGroups.length === 0) {
+      showToast("Bu öğretmenin branşına uygun sınıf bulunamadı.");
+      return;
+    }
+
+    const subjectToUse = resolveTeacherSubject(teacher);
+    const newAsgs = [];
+    matchingGroups.forEach(g => {
+      const alreadyHas = dykAssignments.some(a => a.groupId === g.id && a.teacherId === teacher.id);
+      if (!alreadyHas) {
+        newAsgs.push({
+          groupId: g.id,
+          teacherId: teacher.id,
+          teacherName: teacher.name,
+          subject: subjectToUse,
+          blocksPerWeek: 1
+        });
+      }
+    });
+
+    if (newAsgs.length === 0) {
+      showToast(`"${teacher.name}" zaten uygun tüm sınıflara atanmış.`);
+      return;
+    }
+
+    addMultipleDykAssignments(newAsgs);
+    showToast(`🎉 "${teacher.name}" uygun ${newAsgs.length} sınıfa başarıyla atandı!`);
+  };
+
+  // 🗑️ Öğretmenin Tüm Sınıf Atamalarını Temizle
+  const handleRemoveAllAssignmentsForTeacher = (teacherId, teacherName) => {
+    const teacherAsgs = dykAssignments.filter(a => a.teacherId === teacherId);
+    if (teacherAsgs.length === 0) return;
+    teacherAsgs.forEach(a => deleteDykAssignment(a.id));
+    showToast(`"${teacherName}" öğretmeninin tüm sınıf atamaları kaldırıldı.`);
   };
 
   const toggleTeacherAvailabilityDay = (tId, day) => {
@@ -460,6 +546,7 @@ export default function DykPlanner() {
       addDykAssignment({
         groupId: assignClassId,
         teacherId: teacher.id,
+        teacherName: teacher.name,
         subject: subjectToUse,
         blocksPerWeek: blocks
       });
@@ -487,13 +574,14 @@ export default function DykPlanner() {
       if (Number(existingAsg.blocksPerWeek) === blocks) {
         return;
       }
-      updateDykAssignment(existingAsg.id, { blocksPerWeek: blocks });
+      updateDykAssignment(existingAsg.id, { blocksPerWeek: blocks, teacherName: teacher.name });
       showToast(`✓ "${teacher.name}" (${existingAsg.subject}) haftalık yükü ${blocks} Blok (${blocks * 2} Saat) olarak güncellendi.`);
     } else {
       const subjectToUse = resolveTeacherSubject(teacher);
       addDykAssignment({
         groupId: assignClassId,
         teacherId: teacher.id,
+        teacherName: teacher.name,
         subject: subjectToUse,
         blocksPerWeek: blocks
       });
@@ -503,7 +591,7 @@ export default function DykPlanner() {
     }
   };
 
-  // ⚡ Seçili Sınıfa Branş Öğretmenlerini Toplu Eşleme Onayı
+  // ⚡ Seçili Sınıfa Branş Öğretmenlerini Toplu Eşleme Onayı (Yük Dengeli & Harici Öğretmen Öncelikli)
   const handleBatchAssignToCurrentClass = () => {
     if (!assignClassId) {
       showToast("Lütfen önce bir sınıf kartı seçin.");
@@ -522,6 +610,11 @@ export default function DykPlanner() {
       targetSubjects = ["Matematik", "Türk Dili ve Edebiyatı", "Tarih", "Coğrafya"];
     }
 
+    const teacherLoads = {};
+    dykAssignments.forEach(a => {
+      teacherLoads[a.teacherId] = (teacherLoads[a.teacherId] || 0) + (Number(a.blocksPerWeek) || 1);
+    });
+
     const newAssignments = [];
     const usedSubjects = new Set(
       dykAssignments.filter(a => a.groupId === assignClassId).map(a => a.subject.toLowerCase())
@@ -533,22 +626,32 @@ export default function DykPlanner() {
     targetSubjects.forEach(subj => {
       if (usedSubjects.has(subj.toLowerCase())) return;
 
-      const teacher = dykEligibleTeachers.find(t => {
+      const matchingTeachers = dykEligibleTeachers.filter(t => {
         if (assignedTeacherIds.has(t.id)) return false;
         const b = (t.branch || "").toLowerCase();
         const s = subj.toLowerCase();
         return b.includes(s) || s.includes(b);
       });
 
-      if (teacher) {
+      if (matchingTeachers.length > 0) {
+        // Yük dengeli sıralama (Harici öğretmenler dahil)
+        matchingTeachers.sort((tA, tB) => {
+          const loadA = (teacherLoads[tA.id] || 0) - (tA.isExternalDyk ? 0.5 : 0);
+          const loadB = (teacherLoads[tB.id] || 0) - (tB.isExternalDyk ? 0.5 : 0);
+          return loadA - loadB;
+        });
+
+        const teacher = matchingTeachers[0];
         newAssignments.push({
           groupId: assignClassId,
           teacherId: teacher.id,
+          teacherName: teacher.name,
           subject: subj,
           blocksPerWeek: Number(assignBlocks) || 1
         });
         assignedTeacherIds.add(teacher.id);
         usedSubjects.add(subj.toLowerCase());
+        teacherLoads[teacher.id] = (teacherLoads[teacher.id] || 0) + (Number(assignBlocks) || 1);
       }
     });
 
@@ -573,12 +676,17 @@ export default function DykPlanner() {
     });
   };
 
-  // 🚀 Tüm Sınıflara Standart DYK Kadrosunu Toplu Ekle ve Onayla
+  // 🚀 Tüm Sınıflara Standart DYK Kadrosunu Toplu Ekle ve Onayla (Yük Dengeli & Harici Öğretmenler Dahil)
   const handleBatchAssignAllClassesConfirm = () => {
     if (dykGroups.length === 0) {
       showToast("Kayıtlı DYK sınıfı bulunmuyor.");
       return;
     }
+
+    const teacherLoads = {};
+    dykAssignments.forEach(a => {
+      teacherLoads[a.teacherId] = (teacherLoads[a.teacherId] || 0) + (Number(a.blocksPerWeek) || 1);
+    });
 
     const allNewAssignments = [];
 
@@ -600,22 +708,32 @@ export default function DykPlanner() {
       targetSubjects.forEach(subj => {
         if (usedSubjects.has(subj.toLowerCase())) return;
 
-        const teacher = dykEligibleTeachers.find(t => {
+        const matchingTeachers = dykEligibleTeachers.filter(t => {
           if (assignedTeacherIds.has(t.id)) return false;
           const b = (t.branch || "").toLowerCase();
           const s = subj.toLowerCase();
           return b.includes(s) || s.includes(b);
         });
 
-        if (teacher) {
+        if (matchingTeachers.length > 0) {
+          // Dengeli dağıtım: Yükü az olan öğretmene ve harici öğretmenlere öncelik
+          matchingTeachers.sort((tA, tB) => {
+            const loadA = (teacherLoads[tA.id] || 0) - (tA.isExternalDyk ? 0.5 : 0);
+            const loadB = (teacherLoads[tB.id] || 0) - (tB.isExternalDyk ? 0.5 : 0);
+            return loadA - loadB;
+          });
+
+          const teacher = matchingTeachers[0];
           allNewAssignments.push({
             groupId: group.id,
             teacherId: teacher.id,
+            teacherName: teacher.name,
             subject: subj,
             blocksPerWeek: Number(assignBlocks) || 1
           });
           assignedTeacherIds.add(teacher.id);
           usedSubjects.add(subj.toLowerCase());
+          teacherLoads[teacher.id] = (teacherLoads[teacher.id] || 0) + (Number(assignBlocks) || 1);
         }
       });
     });
@@ -645,9 +763,11 @@ export default function DykPlanner() {
       showToast("Lütfen tüm alanları doldurun.");
       return;
     }
+    const tObj = teachers.find(t => t.id === assignTeacherId);
     addDykAssignment({
       groupId: assignClassId,
       teacherId: assignTeacherId,
+      teacherName: tObj?.name || '',
       subject: assignSubject.trim(),
       blocksPerWeek: Number(assignBlocks) || 1
     });
@@ -763,7 +883,70 @@ export default function DykPlanner() {
     }
   };
 
-  const getTeacherName = (tId) => teachers.find(t => t.id === tId)?.name || tId;
+  // ⚡ Çarşaf Tabloda Seçili Slotun Öğretmenini Değiştirme
+  const handleChangeSlotTeacher = (groupId, day, blockId, newTeacherId) => {
+    if (!dykSchedule?.[groupId]?.[day]?.[blockId]) return;
+    const currentCell = dykSchedule[groupId][day][blockId];
+    const newTeacher = teachers.find(t => t.id === newTeacherId);
+    if (!newTeacher) return;
+
+    // Öğretmenin o gün ve saatte başka bir grupta dersi var mı kontrol et
+    for (const gId of Object.keys(dykSchedule)) {
+      if (gId === groupId) continue;
+      const c = dykSchedule[gId]?.[day]?.[blockId];
+      if (c && c.teacherId === newTeacherId) {
+        showToast(`🚫 "${newTeacher.name}" bu saatte (${day} ${blockId}) "${getGroupName(gId)}" sınıfında derste!`);
+        return;
+      }
+    }
+
+    const updatedSchedule = JSON.parse(JSON.stringify(dykSchedule));
+    updatedSchedule[groupId][day][blockId] = {
+      ...currentCell,
+      teacherId: newTeacher.id,
+      teacherName: newTeacher.name
+    };
+    setDykSchedule(updatedSchedule);
+
+    if (currentCell.assignmentId) {
+      updateDykAssignment(currentCell.assignmentId, {
+        teacherId: newTeacher.id,
+        teacherName: newTeacher.name
+      });
+    }
+
+    if (selectedSwapSlot && selectedSwapSlot.groupId === groupId && selectedSwapSlot.day === day && selectedSwapSlot.blockId === blockId) {
+      setSelectedSwapSlot({
+        ...selectedSwapSlot,
+        cell: updatedSchedule[groupId][day][blockId]
+      });
+    }
+
+    showToast(`✓ "${currentCell.subject}" dersi öğretmeni "${newTeacher.name}" olarak güncellendi.`);
+  };
+
+  const getTeacherName = (tId) => {
+    if (!tId) return '';
+    const found = teachers?.find(t => t.id === tId);
+    if (found?.name) return found.name;
+    const asgMatch = dykAssignments?.find(a => a.teacherId === tId);
+    if (asgMatch && (asgMatch.teacherName || asgMatch.name)) return asgMatch.teacherName || asgMatch.name;
+    const eligMatch = dykEligibleTeachers?.find(t => t.id === tId);
+    if (eligMatch?.name) return eligMatch.name;
+    if (dykSchedule) {
+      for (const gId of Object.keys(dykSchedule)) {
+        for (const d of Object.keys(dykSchedule[gId] || {})) {
+          for (const bId of Object.keys(dykSchedule[gId][d] || {})) {
+            const cell = dykSchedule[gId][d][bId];
+            if (cell?.teacherId === tId && cell?.teacherName) {
+              return cell.teacherName;
+            }
+          }
+        }
+      }
+    }
+    return tId;
+  };
   const getGroupName = (gId) => dykGroups.find(g => g.id === gId)?.name || gId;
 
   const formatDateTurkish = (dateStr) => {
@@ -1783,6 +1966,92 @@ export default function DykPlanner() {
                           })}
                         </div>
                       </div>
+
+                      {/* 🎓 DERSE GİRECEĞİ DYK SINIFLARI VE SEÇİM KARTLARI */}
+                      {!isExcluded && (
+                        <div className="pt-2.5 border-t border-slate-100 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
+                              <GraduationCap size={13} className="text-emerald-600" />
+                              <span>Derse Gireceği Sınıf Kartları</span>
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleAssignTeacherToAllMatchingGroups(teacher)}
+                                className="text-[10px] font-extrabold text-emerald-700 hover:text-emerald-900 hover:underline cursor-pointer"
+                                title="Bu öğretmeni branşına uygun tüm sınıflara ata"
+                              >
+                                + Uygun Sınıflara Ata
+                              </button>
+                              {dykAssignments.some(a => a.teacherId === teacher.id) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveAllAssignmentsForTeacher(teacher.id, teacher.name)}
+                                  className="text-[10px] font-bold text-rose-500 hover:text-rose-700 cursor-pointer"
+                                  title="Bu öğretmenin tüm sınıf atamalarını kaldır"
+                                >
+                                  Temizle
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Sınıf Seçim Hapları */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {dykGroups.filter(g => isGroupMatchingTeacherBranch(g, teacher.branch)).map(group => {
+                              const asg = dykAssignments.find(a => a.groupId === group.id && a.teacherId === teacher.id);
+                              const isAssigned = Boolean(asg);
+                              const currentBlocks = asg ? (Number(asg.blocksPerWeek) || 1) : 1;
+
+                              return (
+                                <div
+                                  key={group.id}
+                                  className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-xl border transition-all ${
+                                    isAssigned
+                                      ? 'bg-emerald-600 border-emerald-700 text-white shadow-2xs'
+                                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-emerald-300 hover:bg-emerald-50/50'
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleTeacherGroupAssignment(teacher, group.id)}
+                                    className="cursor-pointer flex items-center gap-1"
+                                    title={isAssigned ? "Atamayı kaldırmak için tıklayın" : `"${group.name}" sınıfına atamak için tıklayın`}
+                                  >
+                                    <span>{isAssigned ? '✓' : '+'}</span>
+                                    <span>{group.name}</span>
+                                  </button>
+
+                                  {isAssigned && (
+                                    <div className="flex items-center gap-0.5 ml-1 border-l border-emerald-500/50 pl-1">
+                                      {[1, 2, 3].map(b => (
+                                        <button
+                                          key={b}
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            updateDykAssignment(asg.id, { blocksPerWeek: b });
+                                            showToast(`"${teacher.name}" ${group.name} dersi ${b} Blok (${b * 2} Saat) yapıldı.`);
+                                          }}
+                                          className={`px-1 py-0.2 rounded text-[9px] font-black cursor-pointer transition-colors ${
+                                            currentBlocks === b
+                                              ? 'bg-white text-emerald-800'
+                                              : 'text-emerald-200 hover:text-white'
+                                          }`}
+                                          title={`${b} Blok (${b * 2} Saat)`}
+                                        >
+                                          {b}B
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
@@ -2427,17 +2696,36 @@ export default function DykPlanner() {
                       </span>
                     </div>
                     <div className="text-[11px] text-emerald-100 mt-0.5">
-                      Seçilen: <strong>{getGroupName(selectedSwapSlot.groupId)}</strong> · <strong>{selectedSwapSlot.day}</strong> {selectedSwapSlot.blockId} ({selectedSwapSlot.cell.subject} - {getTeacherName(selectedSwapSlot.cell.teacherId)}).
+                      Seçilen: <strong>{getGroupName(selectedSwapSlot.groupId)}</strong> · <strong>{selectedSwapSlot.day}</strong> {selectedSwapSlot.blockId} ({selectedSwapSlot.cell.subject} - {selectedSwapSlot.cell.teacherName || getTeacherName(selectedSwapSlot.cell.teacherId)}).
                       Taşımak için boş bir saate veya takas etmek için başka bir derse tıklayın.
                     </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => setSelectedSwapSlot(null)}
-                  className="px-3.5 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition-all cursor-pointer"
-                >
-                  Takası İptal Et
-                </button>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Hızlı Öğretmen Seçimi / Değiştirici */}
+                  <div className="flex items-center gap-1.5 bg-emerald-700/90 px-2.5 py-1.5 rounded-xl border border-emerald-400/60 shadow-2xs">
+                    <span className="text-[11px] font-bold text-emerald-100">Öğretmen:</span>
+                    <select
+                      value={selectedSwapSlot.cell.teacherId}
+                      onChange={(e) => handleChangeSlotTeacher(selectedSwapSlot.groupId, selectedSwapSlot.day, selectedSwapSlot.blockId, e.target.value)}
+                      className="bg-emerald-800 text-white border border-emerald-400/80 rounded-lg px-2 py-0.5 text-xs font-bold cursor-pointer focus:outline-none"
+                    >
+                      {dykEligibleTeachers.map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.branch || 'Genel'}) {t.isExternalDyk ? '• Harici' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    onClick={() => setSelectedSwapSlot(null)}
+                    className="px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Seçimi Kapat
+                  </button>
+                </div>
               </div>
             )}
 
@@ -2629,22 +2917,47 @@ export default function DykPlanner() {
                                     })
                                   : null;
 
+                                // ⚡ Sürüklenen / Seçilen Takas Slotunun Bu Hücre İçin Uygunluğu (Öğretmen Müsaitlik Denetimi)
+                                const swapEval = isSwapActive && !isSelected && selectedSwapSlot.groupId === currentGroupId
+                                  ? evaluateDykSwapOpportunity({
+                                      dykSchedule,
+                                      sourceGroupId: selectedSwapSlot.groupId,
+                                      sourceDay: selectedSwapSlot.day,
+                                      sourceBlockId: selectedSwapSlot.blockId,
+                                      sourceCell: selectedSwapSlot.cell,
+                                      targetGroupId: currentGroupId,
+                                      targetDay: day,
+                                      targetBlockId: block.id,
+                                      targetCell: item,
+                                      dykTeacherAvailabilities,
+                                      activeDays
+                                    })
+                                  : null;
+
                                 const isAvailableForPool = Boolean(slotAvailability && slotAvailability.canPlace && !item);
                                 const isConflictForPool = Boolean(slotAvailability && !slotAvailability.canPlace && slotAvailability.status === 'teacher_conflict');
+
+                                const isAvailableForSwap = Boolean(swapEval && swapEval.canSwap);
+                                const isBlockedForSwap = Boolean(swapEval && !swapEval.canSwap);
 
                                 return (
                                   <td
                                     key={day}
                                     onClick={() => handleSlotClick(currentGroupId, day, block.id, item)}
                                     onDragOver={(e) => {
-                                      if (selectedPoolActivity || selectedSwapSlot) {
+                                      if (selectedPoolActivity || (isSwapActive && isAvailableForSwap)) {
                                         e.preventDefault();
                                         e.dataTransfer.dropEffect = 'move';
                                       }
                                     }}
                                     onDrop={(e) => {
-                                      e.preventDefault();
-                                      handleSlotClick(currentGroupId, day, block.id, item);
+                                      if (selectedPoolActivity || (isSwapActive && isAvailableForSwap)) {
+                                        e.preventDefault();
+                                        handleSlotClick(currentGroupId, day, block.id, item);
+                                      } else if (isSwapActive && isBlockedForSwap) {
+                                        e.preventDefault();
+                                        showToast(`🚫 Taşıma engellendi: ${swapEval.reason}`);
+                                      }
                                     }}
                                     className={`p-3 border-r border-slate-200 last:border-r-0 print:border-black transition-all cursor-pointer select-none relative ${
                                       isSelected 
@@ -2653,10 +2966,12 @@ export default function DykPlanner() {
                                         ? 'bg-emerald-50/90 hover:bg-emerald-100 border-2 border-dashed border-emerald-500 shadow-sm ring-2 ring-emerald-500/20'
                                         : isConflictForPool
                                         ? 'bg-rose-50/70 border border-rose-300 text-rose-800 cursor-not-allowed'
-                                        : isSwapActive && !item
-                                        ? 'bg-emerald-50/70 hover:bg-emerald-100/80 border-dashed border-emerald-400'
-                                        : isSwapActive && item && !isSelected
-                                        ? 'hover:bg-blue-50/80 border-dashed border-blue-400'
+                                        : isAvailableForSwap && !item
+                                        ? 'bg-emerald-50/90 hover:bg-emerald-100/90 border-2 border-dashed border-emerald-500 ring-2 ring-emerald-500/20'
+                                        : isAvailableForSwap && item
+                                        ? 'bg-blue-50/90 hover:bg-blue-100 border-2 border-dashed border-blue-400'
+                                        : isBlockedForSwap
+                                        ? 'bg-rose-50/40 border border-rose-200 text-rose-700/60 cursor-not-allowed opacity-60'
                                         : isPoolActive && item
                                         ? 'opacity-50 hover:opacity-80'
                                         : 'hover:bg-slate-50/80'
@@ -2668,10 +2983,10 @@ export default function DykPlanner() {
                                         ? `✓ Müsait Kurs Saati: Bırakın veya tıklayarak yerleştirin (${times.startTime} - ${times.endTime})`
                                         : isConflictForPool
                                         ? `🚫 Meşgul: ${slotAvailability.reason}`
-                                        : isSwapActive
-                                        ? (item ? "Bu ders ile TAKAS ET" : "Bu boş saate TAŞI")
-                                        : isPoolActive
-                                        ? (item ? "Dolu saat (Başka bir hücre seçiniz)" : "Havuzdaki dersi BURAYA YERLEŞTİR")
+                                        : isAvailableForSwap
+                                        ? (item ? `⚡ ${swapEval.reason}` : `✓ ${swapEval.reason}`)
+                                        : isBlockedForSwap
+                                        ? `🚫 Uygun Değil: ${swapEval.reason}`
                                         : item ? `Akıllı Takas / Taşıma için Tıklayın (${times.startTime} - ${times.endTime})` : `Boş saat (${times.startTime} - ${times.endTime})`
                                     }
                                   >
@@ -2697,8 +3012,13 @@ export default function DykPlanner() {
                                         <div className={`text-xs font-black ${isSelected ? 'text-white' : 'text-emerald-900 print:text-black'}`}>
                                           {item.subject}
                                         </div>
-                                        <div className={`text-[11px] font-semibold mt-0.5 ${isSelected ? 'text-emerald-100' : 'text-slate-600 print:text-black'}`}>
-                                          {getTeacherName(item.teacherId)}
+                                        <div className={`text-[11px] font-semibold mt-0.5 ${isSelected ? 'text-emerald-100' : 'text-slate-600 print:text-black'} flex items-center justify-center gap-1`}>
+                                          <span>{item.teacherName || getTeacherName(item.teacherId)}</span>
+                                          {teachers.find(t => t.id === item.teacherId)?.isExternalDyk && (
+                                            <span className="text-[8px] font-black px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 border border-purple-200 print:text-black">
+                                              Harici
+                                            </span>
+                                          )}
                                         </div>
                                         <div className={`text-[10px] font-mono mt-1 flex items-center justify-between ${
                                           isSelected ? 'text-emerald-200' : 'text-emerald-800 print:text-gray-600'
@@ -2710,7 +3030,7 @@ export default function DykPlanner() {
                                             </span>
                                           )}
                                         </div>
-                                        {isSwapActive && !isSelected && (
+                                        {isAvailableForSwap && item && !isSelected && (
                                           <div className="text-[10px] font-bold text-blue-700 mt-1 flex items-center justify-center gap-1 print:hidden">
                                             <ArrowRightLeft size={10} />
                                             <span>Takas Et</span>
@@ -2737,9 +3057,13 @@ export default function DykPlanner() {
                                               {slotAvailability.reason}
                                             </span>
                                           </div>
-                                        ) : isSwapActive ? (
-                                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-1 rounded-lg border border-emerald-300 block print:hidden">
+                                        ) : isAvailableForSwap ? (
+                                          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-1 rounded-lg border border-emerald-400 block print:hidden shadow-2xs animate-pulse">
                                             + Buraya Taşı
+                                          </span>
+                                        ) : isBlockedForSwap ? (
+                                          <span className="text-[10px] font-semibold text-rose-600/80 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 block truncate print:hidden" title={swapEval.reason}>
+                                            🚫 Müsait Değil
                                           </span>
                                         ) : isPoolActive ? (
                                           <span className="text-[11px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 block print:hidden">
@@ -2931,23 +3255,48 @@ export default function DykPlanner() {
                                         })
                                       : null;
 
+                                    // ⚡ Sürüklenen / Seçilen Takas Slotunun Bu Hücre İçin Uygunluğu (Öğretmen Müsaitlik Denetimi)
+                                    const swapEval = isSwapActive && !isSelected && selectedSwapSlot.groupId === group.id
+                                      ? evaluateDykSwapOpportunity({
+                                          dykSchedule,
+                                          sourceGroupId: selectedSwapSlot.groupId,
+                                          sourceDay: selectedSwapSlot.day,
+                                          sourceBlockId: selectedSwapSlot.blockId,
+                                          sourceCell: selectedSwapSlot.cell,
+                                          targetGroupId: group.id,
+                                          targetDay: day,
+                                          targetBlockId: b.id,
+                                          targetCell: cell,
+                                          dykTeacherAvailabilities,
+                                          activeDays
+                                        })
+                                      : null;
+
                                     const isAvailableForPool = Boolean(slotAvailability && slotAvailability.canPlace && !cell);
                                     const isConflictForPool = Boolean(slotAvailability && !slotAvailability.canPlace && slotAvailability.status === 'teacher_conflict');
                                     const isWrongGroup = Boolean(slotAvailability && slotAvailability.status === 'wrong_group');
+
+                                    const isAvailableForSwap = Boolean(swapEval && swapEval.canSwap);
+                                    const isBlockedForSwap = Boolean(swapEval && !swapEval.canSwap);
 
                                     return (
                                       <td
                                         key={b.id}
                                         onClick={() => handleSlotClick(group.id, day, b.id, cell)}
                                         onDragOver={(e) => {
-                                          if (selectedPoolActivity || selectedSwapSlot) {
+                                          if (selectedPoolActivity || (isSwapActive && isAvailableForSwap)) {
                                             e.preventDefault();
                                             e.dataTransfer.dropEffect = 'move';
                                           }
                                         }}
                                         onDrop={(e) => {
-                                          e.preventDefault();
-                                          handleSlotClick(group.id, day, b.id, cell);
+                                          if (selectedPoolActivity || (isSwapActive && isAvailableForSwap)) {
+                                            e.preventDefault();
+                                            handleSlotClick(group.id, day, b.id, cell);
+                                          } else if (isSwapActive && isBlockedForSwap) {
+                                            e.preventDefault();
+                                            showToast(`🚫 Taşıma engellendi: ${swapEval.reason}`);
+                                          }
                                         }}
                                         className={`p-1.5 border-r border-slate-200 last:border-r-0 print:border-black min-w-[95px] transition-all cursor-pointer select-none relative ${
                                           isSelected
@@ -2958,10 +3307,12 @@ export default function DykPlanner() {
                                             ? 'bg-rose-50/70 border border-rose-300 text-rose-800 cursor-not-allowed'
                                             : isWrongGroup
                                             ? 'opacity-35 cursor-not-allowed'
-                                            : isSwapActive && !cell && selectedSwapSlot.groupId === group.id
-                                            ? 'bg-emerald-50/80 hover:bg-emerald-100 border-dashed border-emerald-400'
-                                            : isSwapActive && cell && selectedSwapSlot.groupId === group.id && !isSelected
-                                            ? 'hover:bg-blue-50/80 border-dashed border-blue-400'
+                                            : isAvailableForSwap && !cell
+                                            ? 'bg-emerald-50/90 hover:bg-emerald-100/90 border-2 border-dashed border-emerald-500 ring-2 ring-emerald-500/20'
+                                            : isAvailableForSwap && cell
+                                            ? 'bg-blue-50/90 hover:bg-blue-100 border-2 border-dashed border-blue-400'
+                                            : isBlockedForSwap
+                                            ? 'bg-rose-50/40 border border-rose-200 text-rose-700/60 cursor-not-allowed opacity-60'
                                             : isPoolActive && cell
                                             ? 'opacity-50'
                                             : 'hover:bg-slate-50/80'
@@ -2975,8 +3326,10 @@ export default function DykPlanner() {
                                             ? `🚫 Meşgul: ${slotAvailability.reason}`
                                             : isWrongGroup
                                             ? `Bu ders ${getGroupName(selectedPoolActivity.groupId)} sınıfına ait`
-                                            : isSwapActive && selectedSwapSlot.groupId === group.id
-                                            ? (cell ? "Takas Et" : "Buraya Taşı")
+                                            : isAvailableForSwap
+                                            ? (cell ? `⚡ ${swapEval.reason}` : `✓ ${swapEval.reason}`)
+                                            : isBlockedForSwap
+                                            ? `🚫 Uygun Değil: ${swapEval.reason}`
                                             : cell ? `Seçmek için tıklayın (${times.startTime} - ${times.endTime})` : `Boş (${times.startTime} - ${times.endTime})`
                                         }
                                       >
@@ -3002,12 +3355,22 @@ export default function DykPlanner() {
                                             <div className={`font-bold ${isSelected ? 'text-white' : 'text-emerald-900 print:text-black'}`}>
                                               {cell.subject}
                                             </div>
-                                            <div className={`text-[9px] truncate ${isSelected ? 'text-emerald-100' : 'text-slate-500 print:text-black'}`}>
-                                              {getTeacherName(cell.teacherId)}
+                                            <div className={`text-[9px] truncate ${isSelected ? 'text-emerald-100' : 'text-slate-500 print:text-black'} flex items-center justify-center gap-1`}>
+                                              <span>{cell.teacherName || getTeacherName(cell.teacherId)}</span>
+                                              {teachers.find(t => t.id === cell.teacherId)?.isExternalDyk && (
+                                                <span className="text-[7.5px] font-black px-1 rounded bg-purple-100 text-purple-800 print:text-black">
+                                                  Harici
+                                                </span>
+                                              )}
                                             </div>
                                             <div className={`text-[8px] font-mono mt-0.5 ${isSelected ? 'text-emerald-200' : 'text-slate-400 print:text-black'}`}>
                                               {times.startTime}
                                             </div>
+                                            {isAvailableForSwap && !isSelected && (
+                                              <div className="text-[8px] font-black text-blue-700 mt-0.5 print:hidden">
+                                                ⇄ Takas
+                                              </div>
+                                            )}
                                           </div>
                                         ) : (
                                           <div className="py-1 text-center">
@@ -3019,9 +3382,13 @@ export default function DykPlanner() {
                                               <span className="text-[8px] font-bold text-rose-700 bg-rose-100 px-1 py-0.5 rounded border border-rose-200 block truncate" title={slotAvailability.reason}>
                                                 🚫 Meşgul
                                               </span>
-                                            ) : isSwapActive && selectedSwapSlot.groupId === group.id ? (
-                                              <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-300 block print:hidden">
+                                            ) : isAvailableForSwap ? (
+                                              <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-400 block print:hidden shadow-2xs animate-pulse">
                                                 +Taşı
+                                              </span>
+                                            ) : isBlockedForSwap ? (
+                                              <span className="text-[8px] font-semibold text-rose-600/80 bg-rose-50 px-1 py-0.5 rounded border border-rose-200 block truncate print:hidden" title={swapEval.reason}>
+                                                🚫 Uygun Değil
                                               </span>
                                             ) : (
                                               <span className="text-slate-200 print:text-gray-300">—</span>
@@ -3279,6 +3646,25 @@ export default function DykPlanner() {
           </div>
         </div>
       )}
+
+      {/* 📌 ALT BİLGİ (HAZIRLAYAN) */}
+      <footer className="print:hidden border-t border-slate-200/80 bg-white py-3.5 px-6 mt-8 text-center text-xs text-slate-500">
+        <div className="max-w-[1600px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>DYK Destekleme ve Yetiştirme Kursu Planlama Modülü</span>
+          <div className="flex items-center gap-2 font-bold text-slate-700">
+            <span>Hazırlayan: Tamer Közleme</span>
+            <span className="text-slate-300">|</span>
+            <a
+              href="https://instagram.com/Tamerkzlm"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-600 hover:text-emerald-800 hover:underline"
+            >
+              instagram: Tamerkzlm
+            </a>
+          </div>
+        </div>
+      </footer>
 
     </div>
   );

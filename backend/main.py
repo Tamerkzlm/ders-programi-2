@@ -37,11 +37,11 @@ async def lifespan(app: FastAPI):
 # FastAPI uygulamasını lifespan ile başlatıyoruz
 app = FastAPI(title="Ders Programı API", lifespan=lifespan)
 
-# CORS Ayarları - 5174 Portu ve Yerel Varyasyonlar Listeye Eklendi
+# CORS Ayarları - Yerel geliştirme + Netlify / Vercel bulut dağıtımı desteği
 default_origins = (
     "http://localhost:5173,"
     "http://127.0.0.1:5173,"
-    "http://localhost:5174,"  # Yeni React portumuz kesinlikle eklendi
+    "http://localhost:5174,"
     "http://127.0.0.1:5174"
 )
 allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", default_origins)
@@ -51,15 +51,17 @@ logger.info(f"CORS allowed origins: {allowed_origins}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_origin_regex=r"https://.*\.(netlify\.app|vercel\.app|onrender\.com)",
+    allow_credentials=False if "*" in allowed_origins else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+@app.get("/")
 @app.get("/health")
 def health_check():
-    """UptimeRobot ping endpoint to prevent cold starts."""
-    return {"status": "ok", "message": "API is running"}
+    """UptimeRobot ve Frontend Pre-Warm ping uç noktası (Cold-start önleme)."""
+    return {"status": "ok", "busy": solver_lock.locked(), "message": "API is running"}
 
 @app.get("/solve/progress")
 def solve_progress():

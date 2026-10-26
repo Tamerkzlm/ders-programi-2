@@ -16,3 +16,7 @@ backend/venv/
 *.log
 backend.zip
 proje_kodlari.txt
+scratch/
+desktop_trial/
+abdi_ipekci.pdf
+abdi_ipekci_tam_yedek.json

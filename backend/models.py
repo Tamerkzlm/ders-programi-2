@@ -93,6 +93,8 @@ class PinnedSlot(BaseModel):
     period: int
     subject: str
     teacherId: Optional[str] = None
+    # Optional identifier for 2‑hour block pins (both cells share this id)
+    groupId: Optional[str] = None
 
     class Config:
         extra = "allow"

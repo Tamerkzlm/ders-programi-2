@@ -114,20 +114,27 @@ const getGradeSections = (grade, classrooms = []) => {
       const match = cName.startsWith('11');
       if (!match) return false;
       const coursesUpper = (c.courses || []).map(co => (co.subject || '').toUpperCase());
-      return coursesUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('BİY')) || cName.toUpperCase().includes('SAY');
+      return coursesUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY')) || cName.toUpperCase().includes('SAY');
     }
     if (grade === '11-EA') {
       const match = cName.startsWith('11');
       if (!match) return false;
       const coursesUpper = (c.courses || []).map(co => (co.subject || '').toUpperCase());
-      const isSay = coursesUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('BİY')) || cName.toUpperCase().includes('SAY');
+      const isSay = coursesUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY')) || cName.toUpperCase().includes('SAY');
       return !isSay;
     }
     if (grade === '12-SAY') {
-      return cName.startsWith('12') && cName.toUpperCase().includes('SAY');
+      const match = cName.startsWith('12');
+      if (!match) return false;
+      const coursesUpper = (c.courses || []).map(co => (co.subject || '').toUpperCase());
+      return coursesUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY')) || cName.toUpperCase().includes('SAY');
     }
     if (grade === '12-EA') {
-      return cName.startsWith('12') && (cName.toUpperCase().includes('EA') || cName.toUpperCase().includes('EŞİT'));
+      const match = cName.startsWith('12');
+      if (!match) return false;
+      const coursesUpper = (c.courses || []).map(co => (co.subject || '').toUpperCase());
+      const isSay = coursesUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY')) || cName.toUpperCase().includes('SAY');
+      return !isSay;
     }
     return cName.startsWith(grade) || cName.includes(`${grade}-`) || cName.includes(`${grade}/`);
   });
@@ -174,11 +181,18 @@ export default function ExamPlanner() {
   const [newSubIsMajor, setNewSubIsMajor] = useState(false);
   const [newSubSelectedSections, setNewSubSelectedSections] = useState([]);
 
-  // Kademeler listesi
-  const ALL_POSSIBLE_GRADES = ["9", "10", "11-SAY", "11-EA", "12"];
+  // Kademeler listesi (Ön tanımlı MEB kademeleri: 12. sınıflar SAY ve EA ayrımıyla)
+  const ALL_POSSIBLE_GRADES = ["9", "10", "11-SAY", "11-EA", "12-SAY", "12-EA"];
   const grades = examSettings?.grades || ALL_POSSIBLE_GRADES;
   const examSlots = examSettings?.examSlots || [3, 5];
   const sortedExamSlots = useMemo(() => [...examSlots].sort((a, b) => a - b), [examSlots]);
+
+  // Sistemdeki tüm bilinen/tanımlı kademeler (kullanıcı çıkarsa bile geri ekleyebilsin)
+  const allCandidateGrades = useMemo(() => {
+    const set = new Set([...ALL_POSSIBLE_GRADES, ...(grades || []), ...Object.keys(examSubjectsByGrade || {})]);
+    const order = { "9": 1, "10": 2, "11-SAY": 3, "11-EA": 4, "11": 5, "12-SAY": 6, "12-EA": 7, "12": 8 };
+    return Array.from(set).sort((a, b) => (order[a] || 99) - (order[b] || 99));
+  }, [grades, examSubjectsByGrade]);
 
   // 1. Menü: Tarih Aralığı Günleri (Varsayılan iş günleri)
   const allRangeDays = useMemo(() => {
@@ -331,14 +345,22 @@ export default function ExamPlanner() {
   // Ders adı normalizasyon yardımcısı (Türkçe karakter duyarlı)
   const normalizeSubName = (str = '') => str.trim().toLocaleLowerCase('tr-TR');
 
-  // 11. Sınıf Otomatik Geçiş, 2026-2027 Dönem Ön Ayarı ve Tarih Aralığı Senkronizasyonu
+  // 11. ve 12. Sınıf Alan Ayrımı (SAY/EA), 2026-2027 Dönem Ön Ayarı ve Tarih Aralığı Senkronizasyonu
   useEffect(() => {
     const currentGrades = examSettings?.grades || [];
     let updatedGrades = [...currentGrades];
     const settingsPatch = {};
 
-    if (currentGrades.includes("11") && !currentGrades.includes("11-SAY")) {
-      updatedGrades = currentGrades.flatMap(g => g === "11" ? ["11-SAY", "11-EA"] : [g]);
+    let gradesChanged = false;
+    if (updatedGrades.includes("11") && !updatedGrades.includes("11-SAY")) {
+      updatedGrades = updatedGrades.flatMap(g => g === "11" ? ["11-SAY", "11-EA"] : [g]);
+      gradesChanged = true;
+    }
+    if (updatedGrades.includes("12") && !updatedGrades.includes("12-SAY")) {
+      updatedGrades = updatedGrades.flatMap(g => g === "12" ? ["12-SAY", "12-EA"] : [g]);
+      gradesChanged = true;
+    }
+    if (gradesChanged) {
       settingsPatch.grades = updatedGrades;
     }
 
@@ -364,15 +386,17 @@ export default function ExamPlanner() {
       updateExamSettings(settingsPatch);
     }
 
-    // 11-SAY ve 11-EA ders havuzunu hazırla + Bir ders bir sınıfta ana ders ise tüm sınıflarda senkronize et
+    // 11-SAY/EA ve 12-SAY/EA ders havuzunu hazırla + Bir ders bir sınıfta ana ders ise tüm sınıflarda senkronize et
     const basePool = {
       ...examSubjectsByGrade,
       "11-SAY": examSubjectsByGrade?.["11-SAY"] || DEFAULT_EXAM_SUBJECTS["11-SAY"],
-      "11-EA": examSubjectsByGrade?.["11-EA"] || DEFAULT_EXAM_SUBJECTS["11-EA"]
+      "11-EA": examSubjectsByGrade?.["11-EA"] || DEFAULT_EXAM_SUBJECTS["11-EA"],
+      "12-SAY": examSubjectsByGrade?.["12-SAY"] || DEFAULT_EXAM_SUBJECTS["12-SAY"],
+      "12-EA": examSubjectsByGrade?.["12-EA"] || DEFAULT_EXAM_SUBJECTS["12-EA"]
     };
 
     const canonicalMajorByNorm = new Map();
-    const gradeOrder = ["9", "10", "11-SAY", "11-EA", "12", ...Object.keys(basePool)];
+    const gradeOrder = ["9", "10", "11-SAY", "11-EA", "12-SAY", "12-EA", "12", ...Object.keys(basePool)];
     gradeOrder.forEach(g => {
       (basePool[g] || []).forEach(s => {
         const norm = normalizeSubName(s.name);
@@ -382,7 +406,7 @@ export default function ExamPlanner() {
       });
     });
 
-    let poolChanged = !examSubjectsByGrade?.["11-SAY"] || !examSubjectsByGrade?.["11-EA"];
+    let poolChanged = !examSubjectsByGrade?.["11-SAY"] || !examSubjectsByGrade?.["11-EA"] || !examSubjectsByGrade?.["12-SAY"] || !examSubjectsByGrade?.["12-EA"];
     const syncedPool = {};
     Object.entries(basePool).forEach(([g, list]) => {
       syncedPool[g] = (list || []).map(s => {
@@ -481,14 +505,21 @@ export default function ExamPlanner() {
     showToast(`${customDateInput} tarihi sınav takvimine eklendi.`);
   };
 
-  // 1. Menü: Kademe seçimi toggle
+  // 1. Menü: Kademe seçimi toggle (Dahil et / Çıkar)
   const handleToggleGrade = (gradeToToggle) => {
     let updated;
     if (grades.includes(gradeToToggle)) {
-      if (grades.length === 1) return;
+      if (grades.length === 1) {
+        showToast('En az bir kademe bulunmalıdır.');
+        return;
+      }
       updated = grades.filter(g => g !== gradeToToggle);
+      showToast(`"${getGradeTitle(gradeToToggle)}" sınav programından çıkarıldı.`);
     } else {
       updated = [...grades, gradeToToggle];
+      const order = { "9": 1, "10": 2, "11-SAY": 3, "11-EA": 4, "11": 5, "12-SAY": 6, "12-EA": 7, "12": 8 };
+      updated.sort((a, b) => (order[a] || 99) - (order[b] || 99));
+      showToast(`"${getGradeTitle(gradeToToggle)}" sınav programına dahil edildi.`);
     }
     updateExamSettings({ grades: updated });
     if (!updated.includes(selectedGrade)) {
@@ -505,7 +536,8 @@ export default function ExamPlanner() {
       showToast('Bu kademe zaten mevcut.');
       return;
     }
-    const updated = [...grades, clean];
+    const order = { "9": 1, "10": 2, "11-SAY": 3, "11-EA": 4, "11": 5, "12-SAY": 6, "12-EA": 7, "12": 8 };
+    const updated = [...grades, clean].sort((a, b) => (order[a] || 99) - (order[b] || 99));
     updateExamSettings({ grades: updated });
     if (!examSubjectsByGrade[clean]) {
       setExamSubjectsByGrade({
@@ -519,21 +551,19 @@ export default function ExamPlanner() {
     showToast(`"${clean}" sınıf kademesi başarıyla eklendi.`);
   };
 
-  // 1. Menü: Kademe Sil
+  // 1. & 2. Menü: Kademe Sil / Çıkar
   const handleRemoveGrade = (gradeToRemove, e) => {
     if (e) e.stopPropagation();
     if (grades.length <= 1) {
       showToast('En az bir kademe bulunmalıdır.');
       return;
     }
-    if (window.confirm(`"${gradeToRemove}" kademesini sınav takviminden çıkarmak istediğinize emin misiniz?`)) {
-      const updated = grades.filter(g => g !== gradeToRemove);
-      updateExamSettings({ grades: updated });
-      if (selectedGrade === gradeToRemove) {
-        setSelectedGrade(updated[0] || '9');
-      }
-      showToast(`"${gradeToRemove}" kademesi çıkarıldı.`);
+    const updated = grades.filter(g => g !== gradeToRemove);
+    updateExamSettings({ grades: updated });
+    if (selectedGrade === gradeToRemove) {
+      setSelectedGrade(updated[0] || '9');
     }
+    showToast(`"${getGradeTitle(gradeToRemove)}" sınav programından çıkarıldı.`);
   };
 
   // 1. Menü: Seans saati toggle
@@ -576,10 +606,10 @@ export default function ExamPlanner() {
       const baseGrade = match[1];
 
       let targetGrade = baseGrade;
-      if (baseGrade === '11') {
+      if (baseGrade === '11' || baseGrade === '12') {
         const courseUpper = (c.courses || []).map(co => (co.subject || '').toUpperCase());
-        const isSay = courseUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY'));
-        targetGrade = isSay ? '11-SAY' : '11-EA';
+        const isSay = courseUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY')) || (c.name || '').toUpperCase().includes('SAY');
+        targetGrade = isSay ? `${baseGrade}-SAY` : `${baseGrade}-EA`;
       }
 
       detectedGradesSet.add(targetGrade);
@@ -608,7 +638,7 @@ export default function ExamPlanner() {
     });
 
     const finalSubjects = {};
-    const order = { "9": 1, "10": 2, "11-SAY": 3, "11-EA": 4, "11": 5, "12": 6 };
+    const order = { "9": 1, "10": 2, "11-SAY": 3, "11-EA": 4, "11": 5, "12-SAY": 6, "12-EA": 7, "12": 8 };
     const detectedGrades = Array.from(detectedGradesSet).sort((a, b) => (order[a] || 99) - (order[b] || 99));
 
     detectedGrades.forEach(g => {
@@ -1261,9 +1291,9 @@ export default function ExamPlanner() {
                       </form>
                     )}
 
-                    {/* Mevcut Kademeler Listesi */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
-                      {grades.map(g => {
+                    {/* Mevcut ve Kullanılabilir Kademeler Listesi (Dahil Et / Çıkar) */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
+                      {allCandidateGrades.map(g => {
                         const isSelected = grades.includes(g);
                         const isCustom = !ALL_POSSIBLE_GRADES.includes(g);
 
@@ -1271,23 +1301,40 @@ export default function ExamPlanner() {
                           <div
                             key={g}
                             onClick={() => handleToggleGrade(g)}
-                            className={`py-1.5 px-2.5 rounded-xl text-[11px] font-extrabold transition-all cursor-pointer border text-center relative group flex items-center justify-center gap-1.5 ${
+                            className={`py-1.5 px-2.5 rounded-xl text-[11px] font-extrabold transition-all cursor-pointer border text-center relative group flex items-center justify-between gap-1.5 ${
                               isSelected
-                                ? (g.includes('11') ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs' : 'bg-amber-600 text-white border-amber-700 shadow-2xs')
-                                : 'bg-slate-50 text-slate-500 hover:bg-slate-100 border-slate-200'
+                                ? (g.includes('11')
+                                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs hover:bg-indigo-700'
+                                    : g.includes('12')
+                                    ? 'bg-emerald-700 text-white border-emerald-800 shadow-2xs hover:bg-emerald-800'
+                                    : 'bg-amber-600 text-white border-amber-700 shadow-2xs hover:bg-amber-700')
+                                : 'bg-slate-50 text-slate-400 hover:bg-slate-100 border-dashed border-slate-300 hover:border-slate-400 hover:text-slate-600'
                             }`}
+                            title={isSelected ? `"${getGradeTitle(g)}" kademesini ortak sınav takviminden çıkarmak için tıklayın` : `"${getGradeTitle(g)}" kademesini ortak sınav takvimine dahil etmek için tıklayın`}
                           >
-                            {isCustom && (
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] shrink-0 ${
+                                isSelected ? 'bg-white/25 text-white' : 'border border-slate-300 text-transparent'
+                              }`}>
+                                {isSelected ? <Check size={10} strokeWidth={3} /> : null}
+                              </span>
+                              <span className="truncate">{getGradeTitle(g)}</span>
+                            </div>
+
+                            {isSelected ? (
                               <button
                                 type="button"
                                 onClick={(e) => handleRemoveGrade(g, e)}
-                                className="absolute top-1 right-1 p-0.5 rounded-full bg-black/20 hover:bg-black/40 text-white transition-colors cursor-pointer"
-                                title="Kademeyi Sil"
+                                className="p-0.5 rounded-full bg-black/15 hover:bg-black/35 text-white transition-colors cursor-pointer shrink-0 ml-1"
+                                title={`"${getGradeTitle(g)}" kademesini çıkar`}
                               >
-                                <X size={9} />
+                                <X size={10} />
                               </button>
+                            ) : (
+                              <span className="text-[9px] font-bold text-slate-400 shrink-0">
+                                + Ekle
+                              </span>
                             )}
-                            <span>{getGradeTitle(g)}</span>
                           </div>
                         );
                       })}
@@ -1390,23 +1437,41 @@ export default function ExamPlanner() {
                         const isSelected = selectedGrade === g;
 
                         return (
-                          <button
+                          <div
                             key={g}
-                            type="button"
                             onClick={() => setSelectedGrade(g)}
-                            className={`w-full py-2 px-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 relative ${
+                            className={`w-full py-2 px-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 relative group ${
                               isSelected
                                 ? 'bg-amber-50/90 border-2 border-amber-500 shadow-2xs'
                                 : 'bg-slate-50/70 hover:bg-slate-100 border-slate-200'
                             }`}
                           >
                             <div className="flex items-center justify-between w-full">
-                              <span className="font-extrabold text-xs text-slate-900">
-                                {getGradeTitle(g)}
+                              <span className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5 flex-wrap">
+                                <span>{getGradeTitle(g)}</span>
+                                {getGradeBadge(g) && (
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                                    g.includes('11') ? 'bg-indigo-100 text-indigo-800' : g.includes('12') ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                                  }`}>
+                                    {getGradeBadge(g)}
+                                  </span>
+                                )}
                               </span>
-                              <span className="text-[10px] font-bold px-1.5 py-0 rounded-full bg-white border border-slate-200 text-slate-700">
-                                {subjects.length} Ders
-                              </span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-[10px] font-bold px-1.5 py-0 rounded-full bg-white border border-slate-200 text-slate-700">
+                                  {subjects.length} Ders
+                                </span>
+                                {grades.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleRemoveGrade(g, e)}
+                                    className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors opacity-60 group-hover:opacity-100 cursor-pointer"
+                                    title={`"${getGradeTitle(g)}" kademesini ortak sınav programından çıkar`}
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             <div className="flex items-center justify-between text-[10px] w-full text-slate-500">
@@ -1415,10 +1480,33 @@ export default function ExamPlanner() {
                                 {majorCount} Ana Ders
                               </span>
                             </div>
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
+
+                    {/* Çıkarılan Kademeler (Geri Ekle) */}
+                    {allCandidateGrades.filter(g => !grades.includes(g)).length > 0 && (
+                      <div className="pt-2 border-t border-slate-100 mt-2">
+                        <span className="text-[10px] font-bold text-slate-400 block mb-1.5">
+                          Çıkarılan Kademeler (Geri Ekle):
+                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {allCandidateGrades.filter(g => !grades.includes(g)).map(g => (
+                            <button
+                              key={g}
+                              type="button"
+                              onClick={() => handleToggleGrade(g)}
+                              className="px-2 py-1 rounded-lg border border-dashed border-slate-300 text-slate-600 hover:border-amber-500 hover:text-amber-700 hover:bg-amber-50 text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                              title={`"${getGradeTitle(g)}" kademesini ortak sınav programına geri ekle`}
+                            >
+                              <Plus size={10} />
+                              <span>{getGradeTitle(g)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* 2. SAĞ SÜTUN: SEÇİLİ KADEMENİN DERSLERİ (lg:col-span-9) */}
@@ -1665,8 +1753,8 @@ export default function ExamPlanner() {
 
                                 {/* MEB Ortak Sınav Tarih ve Seans Seçici Panel */}
                                 {sub.isMebExam && (
-                                  <div className="mt-0.5 pt-1.5 border-t border-purple-200/80 bg-white/95 rounded-lg p-1.5 flex flex-wrap items-center justify-between gap-1.5 text-slate-800">
-                                    <div className="flex items-center gap-1 flex-1 min-w-[130px]">
+                                  <div className="mt-1 pt-1.5 border-t border-purple-200/80 bg-purple-50/50 rounded-lg p-1.5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-1.5 text-slate-800">
+                                    <div className="flex items-center gap-1 flex-1 min-w-[120px]">
                                       <span className="text-[9px] font-black text-purple-800 uppercase shrink-0">Tarih:</span>
                                       <select
                                         value={sub.mebDate || workingDays[0]?.date || ''}
@@ -1687,8 +1775,9 @@ export default function ExamPlanner() {
                                       </select>
                                     </div>
 
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-[9px] font-black text-purple-800 uppercase shrink-0">Seans:</span>
+                                    {/* Sınav Saati Seçici - "Seans:" yazısı kaldırılıp saat ikonuyla taşma önlendi */}
+                                    <div className="flex items-center gap-1 shrink-0" title="Sınav Saati / Seans">
+                                      <Clock size={12} className="text-purple-700 shrink-0" />
                                       <select
                                         value={sub.mebSlot || firstSlot}
                                         onChange={(e) =>
@@ -1698,7 +1787,8 @@ export default function ExamPlanner() {
                                             mebSlot: Number(e.target.value)
                                           }, false)
                                         }
-                                        className="bg-white border border-purple-200 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-800 outline-none focus:ring-1 focus:ring-purple-500"
+                                        aria-label="Sınav Saati"
+                                        className="bg-white border border-purple-200 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-800 outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
                                       >
                                         {sortedExamSlots.map(s => (
                                           <option key={s} value={s}>{s}. Ders</option>
@@ -1716,7 +1806,7 @@ export default function ExamPlanner() {
                                         }, true);
                                         showToast(`🏛️ "${sub.name}" MEB tarihi tüm kademelerde senkronize edildi.`);
                                       }}
-                                      className="px-1.5 py-0.5 rounded bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-200 font-bold text-[9.5px] cursor-pointer transition-colors"
+                                      className="px-2 py-0.5 rounded bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-200 font-bold text-[9.5px] cursor-pointer transition-colors shrink-0 whitespace-nowrap"
                                       title="Bu MEB sınav tarihini ve seansını diğer kademelerdeki aynı isimli derse de uygula"
                                     >
                                       Tüm Kademelere Uygula
@@ -2022,6 +2112,25 @@ export default function ExamPlanner() {
 
         </div>
       </main>
+
+      {/* 📌 ALT BİLGİ (HAZIRLAYAN) */}
+      <footer className="print:hidden border-t border-slate-200/80 bg-white py-3.5 px-6 mt-8 text-center text-xs text-slate-500">
+        <div className="max-w-[1600px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>Okul Ortak Sınav Takvimi ve Gözetmenlik Planlama Modülü</span>
+          <div className="flex items-center gap-2 font-bold text-slate-700">
+            <span>Hazırlayan: Tamer Közleme</span>
+            <span className="text-slate-300">|</span>
+            <a
+              href="https://instagram.com/Tamerkzlm"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-amber-600 hover:text-amber-800 hover:underline"
+            >
+              instagram: Tamerkzlm
+            </a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

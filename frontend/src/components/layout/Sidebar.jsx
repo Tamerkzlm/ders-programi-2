@@ -18,6 +18,7 @@ import {
   Layers
 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
+import CloudSyncBar from '../common/CloudSyncBar';
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -152,13 +153,26 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* ⚙️ ALT KURUMSAL BİLGİ & SİSTEM DURUMU */}
-      <div className="p-3 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between text-[11px]">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span className="text-slate-600 font-medium">MEB Maarif v2.4</span>
+      {/* ⚙️ ALT KURUMSAL BİLGİ & HAZIRLAYAN */}
+      <div className="p-3 border-t border-slate-100 bg-slate-50/60 space-y-2 text-[11px]">
+        <CloudSyncBar compact />
+        <div className="flex items-center justify-between pt-1">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="text-slate-700 font-bold">Hazırlayan: Tamer Közleme</span>
+          </div>
         </div>
-        <span className="text-slate-400 font-mono text-[10px]">Çevrimiçi</span>
+        <div className="flex items-center justify-between text-[10px]">
+          <a
+            href="https://instagram.com/Tamerkzlm"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline"
+          >
+            instagram: Tamerkzlm
+          </a>
+          <span className="text-slate-400 font-mono">Çevrimiçi</span>
+        </div>
       </div>
 
     </aside>

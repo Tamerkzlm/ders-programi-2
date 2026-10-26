@@ -143,9 +143,14 @@ export const solveDykSchedule = ({
 
   // 3. Dağıtılacak blok aktiviteleri
   const excludedTeacherIds = dykSettings?.excludedTeacherIds || [];
+  const teacherMap = {};
+  (teachers || []).forEach(t => { teacherMap[t.id] = t; });
+
   const activities = [];
   dykAssignments.forEach(asg => {
     if (excludedTeacherIds.includes(asg.teacherId)) return;
+    const tObj = teacherMap[asg.teacherId];
+    const resolvedTeacherName = asg.teacherName || tObj?.name || 'Öğretmen';
     const blocksCount = Number(asg.blocksPerWeek) || 1;
     for (let i = 0; i < blocksCount; i++) {
       activities.push({
@@ -153,6 +158,7 @@ export const solveDykSchedule = ({
         assignmentId: asg.id,
         groupId: asg.groupId,
         teacherId: asg.teacherId,
+        teacherName: resolvedTeacherName,
         subject: asg.subject
       });
     }
@@ -167,90 +173,165 @@ export const solveDykSchedule = ({
     });
   });
 
-  // 5. Aktiviteleri önceliklendir (Daha az uygun günü olan öğretmenler önce)
+  // 5. Aktiviteleri akıllıca sırala (MRV - Minimum Remaining Values kuralı)
+  // En az müsait günü olan ve en çok kısıtı olan öğretmenlerin dersleri önce yerleştirilir
   activities.sort((a, b) => {
-    const aAvail = dykTeacherAvailabilities[a.teacherId]?.length || activeDays.length;
-    const bAvail = dykTeacherAvailabilities[b.teacherId]?.length || activeDays.length;
-    return aAvail - bAvail;
+    const aAvail = (dykTeacherAvailabilities[a.teacherId] && dykTeacherAvailabilities[a.teacherId].length > 0)
+      ? dykTeacherAvailabilities[a.teacherId].filter(d => activeDays.includes(d)).length
+      : activeDays.length;
+    const bAvail = (dykTeacherAvailabilities[b.teacherId] && dykTeacherAvailabilities[b.teacherId].length > 0)
+      ? dykTeacherAvailabilities[b.teacherId].filter(d => activeDays.includes(d)).length
+      : activeDays.length;
+    if (aAvail !== bAvail) return aAvail - bAvail;
+    
+    // Eşitlik durumunda son derse girenler öncelikli olsun
+    const aLateDays = Object.keys(teacherSchoolAnalysis[a.teacherId] || {}).filter(d => teacherSchoolAnalysis[a.teacherId]?.[d]?.hasLatePeriod).length;
+    const bLateDays = Object.keys(teacherSchoolAnalysis[b.teacherId] || {}).filter(d => teacherSchoolAnalysis[b.teacherId]?.[d]?.hasLatePeriod).length;
+    return bLateDays - aLateDays;
   });
 
   const unassigned = [];
 
-  // 6. Akıllı Yerleştirme Heuristiği (Scoring Engine)
-  activities.forEach(act => {
-    // Öğretmenin DYK için kabul ettiği günler
+  // Yardımcı Aday Değerlendirme & Skorlama Fonksiyonu
+  const evaluateCandidateSlots = (act, currentSchedule, currentTeacherBusy) => {
     const rawAllowed = dykTeacherAvailabilities[act.teacherId];
     const allowedDays = rawAllowed && rawAllowed.length > 0
       ? rawAllowed.filter(d => activeDays.includes(d))
       : activeDays;
 
-    let bestCandidate = null;
-    let highestScore = -Infinity;
+    const candidates = [];
 
-    // Tüm olası (gün, blok) kombinasyonlarını değerlendir
     allowedDays.forEach(day => {
       blocks.forEach((block, blockIdx) => {
-        // Sınıf meşgul mü?
-        if (schedule[act.groupId]?.[day]?.[block.id]) return;
+        // Sınıf bu saatte meşgul mü?
+        if (currentSchedule[act.groupId]?.[day]?.[block.id]) return;
 
-        // Öğretmen meşgul mü?
-        if (teacherBusy[act.teacherId]?.[day]?.[block.id]) return;
+        // Öğretmen bu saatte başka bir grupta meşgul mü?
+        if (currentTeacherBusy[act.teacherId]?.[day]?.[block.id]) return;
 
-        // Skorlama Faktörleri
         let score = 100;
 
-        // 🌟 KRİTİK KURAL: Okul ders programında o gün son dersi var mı?
+        // 🌟 Okul programında o gün son dersi var mı? (En yüksek öncelik)
         const teacherDayInfo = teacherSchoolAnalysis[act.teacherId]?.[day];
         if (teacherDayInfo?.hasLatePeriod) {
-          score += 150; // Çok yüksek öncelik: Okulda son dersten hemen sonra DYK
+          score += 160;
         } else if (teacherDayInfo?.totalHours > 0) {
-          score += 50; // Orta öncelik: O gün zaten okulda dersi var
+          score += 60;
         } else if (day === "Cumartesi") {
-          score += 40; // Cumartesi kurs günü için doğal uygunluk
+          score += 45;
         }
 
         // 🎯 KURAL: Bir sınıfın aynı dersten aynı gün birden fazla bloğu olmasın
-        const sameSubjectOnDay = Object.values(schedule[act.groupId][day] || {}).some(
+        const sameSubjectOnDay = Object.values(currentSchedule[act.groupId][day] || {}).some(
           s => s?.subject === act.subject
         );
         if (sameSubjectOnDay) {
-          score -= 80;
+          score -= 90;
         }
 
-        // 🎯 KURAL: Sınıfın günlük yükünü dengeli dağıt (günde 1-2 blok)
-        const currentGroupBlocksOnDay = Object.keys(schedule[act.groupId][day] || {}).length;
-        score -= currentGroupBlocksOnDay * 20;
+        // 🎯 KURAL: Sınıfın günlük yük dengesi (günde 1-2 blok)
+        const currentGroupBlocksOnDay = Object.keys(currentSchedule[act.groupId][day] || {}).length;
+        score -= currentGroupBlocksOnDay * 25;
 
         // 🎯 KURAL: Blok önceliği (1. bloklar gün sonunda ilk önce dolsun)
         if (blockIdx === 0) {
           score += 25;
         }
 
-        if (score > highestScore) {
-          highestScore = score;
-          bestCandidate = { day, block };
-        }
+        candidates.push({ day, block, score });
       });
     });
 
-    if (bestCandidate) {
-      const { day, block } = bestCandidate;
-      schedule[act.groupId][day][block.id] = {
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates;
+  };
+
+  // 6. Akıllı Yerleştirme (Yerel Arama / Kısıt İyileştirme ile)
+  for (const act of activities) {
+    const candidates = evaluateCandidateSlots(act, schedule, teacherBusy);
+
+    if (candidates.length > 0) {
+      // Doğrudan en yüksek skorlu boş slota yerleştir
+      const best = candidates[0];
+      schedule[act.groupId][best.day][best.block.id] = {
         subject: act.subject,
         teacherId: act.teacherId,
+        teacherName: act.teacherName,
         assignmentId: act.assignmentId
       };
-      if (!teacherBusy[act.teacherId]) {
-        teacherBusy[act.teacherId] = {};
-      }
-      if (!teacherBusy[act.teacherId][day]) {
-        teacherBusy[act.teacherId][day] = {};
-      }
-      teacherBusy[act.teacherId][day][block.id] = true;
+      if (!teacherBusy[act.teacherId]) teacherBusy[act.teacherId] = {};
+      if (!teacherBusy[act.teacherId][best.day]) teacherBusy[act.teacherId][best.day] = {};
+      teacherBusy[act.teacherId][best.day][best.block.id] = true;
     } else {
-      unassigned.push(act);
+      // 🔄 Yerel Arama / Akıllı Takas (1-Derinlikli Deplasman / Ejection Chain)
+      // Boş yer kalmadıysa, bu aktivitenin girebileceği bir slottaki başka bir dersi başka bir müsait boşluğa kaydırarak yer açmaya çalış
+      let placedViaDisplacement = false;
+      const rawAllowed = dykTeacherAvailabilities[act.teacherId];
+      const allowedDays = rawAllowed && rawAllowed.length > 0
+        ? rawAllowed.filter(d => activeDays.includes(d))
+        : activeDays;
+
+      for (const day of allowedDays) {
+        if (placedViaDisplacement) break;
+        for (const block of blocks) {
+          // Sınıfın bu hücresi dolu mu?
+          const occupyingLesson = schedule[act.groupId]?.[day]?.[block.id];
+          if (!occupyingLesson) continue;
+
+          // Bu hücredeki ders aktarılırsa, bizim öğretmen bu saatte müsait mi?
+          const isOurTeacherBusyElsewhere = Boolean(teacherBusy[act.teacherId]?.[day]?.[block.id]);
+          if (isOurTeacherBusyElsewhere) continue;
+
+          // occupyingLesson için sınıfın başka bir boş müsait saati var mı?
+          const otherActDummy = {
+            groupId: act.groupId,
+            teacherId: occupyingLesson.teacherId,
+            subject: occupyingLesson.subject
+          };
+
+          // Geçici olarak occupyingLesson'ı kaldırıp yer ara
+          delete schedule[act.groupId][day][block.id];
+          if (teacherBusy[occupyingLesson.teacherId]?.[day]) {
+            delete teacherBusy[occupyingLesson.teacherId][day][block.id];
+          }
+
+          const altCandidates = evaluateCandidateSlots(otherActDummy, schedule, teacherBusy);
+          if (altCandidates.length > 0) {
+            // occupyingLesson'ı alternatif yere taşı
+            const alt = altCandidates[0];
+            schedule[act.groupId][alt.day][alt.block.id] = occupyingLesson;
+            if (!teacherBusy[occupyingLesson.teacherId]) teacherBusy[occupyingLesson.teacherId] = {};
+            if (!teacherBusy[occupyingLesson.teacherId][alt.day]) teacherBusy[occupyingLesson.teacherId][alt.day] = {};
+            teacherBusy[occupyingLesson.teacherId][alt.day][alt.block.id] = true;
+
+            // Bizim dersi boşalan yere koy
+            schedule[act.groupId][day][block.id] = {
+              subject: act.subject,
+              teacherId: act.teacherId,
+              teacherName: act.teacherName,
+              assignmentId: act.assignmentId
+            };
+            if (!teacherBusy[act.teacherId]) teacherBusy[act.teacherId] = {};
+            if (!teacherBusy[act.teacherId][day]) teacherBusy[act.teacherId][day] = {};
+            teacherBusy[act.teacherId][day][block.id] = true;
+
+            placedViaDisplacement = true;
+            break;
+          } else {
+            // Geri yükle
+            schedule[act.groupId][day][block.id] = occupyingLesson;
+            if (!teacherBusy[occupyingLesson.teacherId]) teacherBusy[occupyingLesson.teacherId] = {};
+            if (!teacherBusy[occupyingLesson.teacherId][day]) teacherBusy[occupyingLesson.teacherId][day] = {};
+            teacherBusy[occupyingLesson.teacherId][day][block.id] = true;
+          }
+        }
+      }
+
+      if (!placedViaDisplacement) {
+        unassigned.push(act);
+      }
     }
-  });
+  }
 
   return {
     success: unassigned.length === 0,
@@ -277,22 +358,87 @@ export const isTeacherFreeInDyk = ({
 }) => {
   if (!teacherId || !day || !blockId) return false;
 
-  // 1. Gün uygunluğu
+  // 1. Gün uygunluğu: Öğretmenin DYK için onayladığı günler
   const allowed = dykTeacherAvailabilities[teacherId];
-  if (allowed && allowed.length > 0 && !allowed.includes(day)) {
-    return { free: false, reason: "Öğretmenin bu gün için DYK onayı bulunmuyor." };
+  if (allowed && Array.isArray(allowed) && allowed.length > 0 && !allowed.includes(day)) {
+    return { free: false, reason: `Öğretmenin ${day} günü için DYK onayı/müsaitliği bulunmuyor.` };
   }
 
-  // 2. Başka bir grupta o saatte dersi var mı?
+  // 2. Başka bir grupta o saatte dersi var mı? (Fiziksel Çakışma)
   for (const gId of Object.keys(dykSchedule)) {
     if (ignoreGroupId && gId === ignoreGroupId) continue;
     const cell = dykSchedule[gId]?.[day]?.[blockId];
     if (cell && cell.teacherId === teacherId) {
-      return { free: false, reason: `Öğretmen bu saatte başka bir grupta (${gId}) derste.` };
+      return { free: false, reason: `Öğretmen bu saatte başka bir grupta derste.` };
     }
   }
 
   return { free: true };
+};
+
+/**
+ * 🔍 İKİ DYK DERSİNİN TAKASI VEYA TAŞINMASINI ÖNCEDEN DEĞERLENDİRİR (Görsel Uyarı & Drag-Drop İçin)
+ */
+export const evaluateDykSwapOpportunity = ({
+  dykSchedule = {},
+  sourceGroupId,
+  sourceDay,
+  sourceBlockId,
+  sourceCell,
+  targetGroupId,
+  targetDay,
+  targetBlockId,
+  targetCell,
+  dykTeacherAvailabilities = {},
+  activeDays = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"]
+}) => {
+  if (!sourceCell) return { canSwap: false, reason: "Kaynak ders bulunamadı." };
+
+  // Farklı sınıflar arası taşımaya izin verilmez (her sınıfın kendi müfredatı vardır)
+  if (sourceGroupId !== targetGroupId) {
+    return { canSwap: false, status: 'wrong_group', reason: "Dersler yalnızca kendi sınıfı içinde taşınabilir." };
+  }
+
+  // Aynı hücre ise
+  if (sourceDay === targetDay && sourceBlockId === targetBlockId) {
+    return { canSwap: true, status: 'same', reason: "Mevcut hücre" };
+  }
+
+  // 1. Kaynak öğretmenin hedef slotta müsaitliği (Özellikle GÜN ONAYI kontrolü!)
+  const sourceCheck = isTeacherFreeInDyk({
+    dykSchedule,
+    teacherId: sourceCell.teacherId,
+    day: targetDay,
+    blockId: targetBlockId,
+    ignoreGroupId: sourceGroupId,
+    dykTeacherAvailabilities,
+    activeDays
+  });
+
+  if (!sourceCheck.free) {
+    return { canSwap: false, status: 'source_teacher_unavailable', reason: sourceCheck.reason };
+  }
+
+  // 2. Eğer hedef hücre doluysa, hedefteki öğretmenin kaynak slotta müsaitliği
+  if (targetCell) {
+    const targetCheck = isTeacherFreeInDyk({
+      dykSchedule,
+      teacherId: targetCell.teacherId,
+      day: sourceDay,
+      blockId: sourceBlockId,
+      ignoreGroupId: sourceGroupId,
+      dykTeacherAvailabilities,
+      activeDays
+    });
+
+    if (!targetCheck.free) {
+      return { canSwap: false, status: 'target_teacher_unavailable', reason: targetCheck.reason };
+    }
+
+    return { canSwap: true, status: 'swap', reason: "Takas Edilebilir (İki ders yer değiştirir)" };
+  }
+
+  return { canSwap: true, status: 'move', reason: "Müsait Boş Saat (Buraya Taşınabilir)" };
 };
 
 /**
@@ -479,6 +625,7 @@ export const placeUnassignedDykActivity = ({
   newSchedule[activity.groupId][targetDay][targetBlockId] = {
     subject: activity.subject,
     teacherId: activity.teacherId,
+    teacherName: activity.teacherName,
     assignmentId: activity.assignmentId
   };
 

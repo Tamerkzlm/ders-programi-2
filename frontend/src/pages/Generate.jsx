@@ -21,6 +21,7 @@ import {
   X
 } from 'lucide-react';
 import TelemetryModal from '../components/telemetry/TelemetryModal';
+import PrePinPanel from '../components/PrePinPanel';
 
 export default function Generate() {
   const { 
@@ -212,6 +213,9 @@ export default function Generate() {
           </div>
         </div>
       )}
+
+      {/* ÖN SABİTLEME PANELİ */}
+      <PrePinPanel />
 
       {/* DAĞITIM TETİKLEME KARTI */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">

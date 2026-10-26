@@ -18,12 +18,9 @@ function RoomSketch({ rows, cols, onDeleteRow, onAddRow }) {
 
   return (
     <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 select-none">
-      {/* Tahta ve Kapı */}
-      <div className="flex items-center justify-between mb-2 gap-2">
-        <div className="text-[9px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded border border-amber-200">
-          KAPI
-        </div>
-        <div className="flex-1 text-center text-[9px] font-bold text-slate-700 bg-slate-200 rounded py-0.5 tracking-wider">
+      {/* Tahta */}
+      <div className="mb-2">
+        <div className="w-full text-center text-[9px] font-bold text-slate-700 bg-slate-200 rounded py-0.5 tracking-wider">
           TAHTA / ÖĞRETMEN MASASI
         </div>
       </div>

@@ -3,6 +3,11 @@
 ## Son Güncellemeler (v3.0 — Ortak Sınav Motoru & Dağıtım İyileştirmeleri)
 
 ### 🎓 Okul Ortak Sınav Takvimi Modülü (`examEngine.js`, `ExamPlanner.jsx`, `appStore.js`)
+- **12. Sınıflar Sayısal (12-SAY) ve Eşit Ağırlık (12-EA) Ön Tanımlı Kademe Desteği & Kademe Yönetimi:**
+  - Ortak sınav programında 12. sınıflar, 11. sınıflarda olduğu gibi `12-SAY` (Sayısal: Fizik, Kimya, Biyoloji, Matematik, Edebiyat vb.) ve `12-EA` (Eşit Ağırlık: Coğrafya, Seçmeli Edebiyat, Çağdaş Türk ve Dünya Tarihi, Matematik vb.) olmak üzere iki bağımsız alan kademesi olarak ön tanımlı hale getirildi.
+  - Okul ders programından otomatik ders aktarımı (`handleAutoImportFromTimetable`) ve şube eşleştirme (`getGradeSections`) fonksiyonları 12A/12B (SAY) ve 12C/12D/12E (EA) sınıflarını ders ve isim bazlı otomatik tespit edecek şekilde zenginleştirildi.
+  - Sınav motoru `examEngine.js` içinde `12-SAY` ve `12-EA` için Sibling Track Alignment (aynı seansta paralel sınav yerleşimi ve çapraz blokaj önleme) kuralı devreye alındı.
+  - Kullanıcıların istemediği kademeleri (örn: YKS denemeleri nedeniyle 12. sınıfları ortak sınavdan muaf tutmak istediklerinde) tek tıkla takvimden çıkarabilmesi (`handleRemoveGrade`), çıkarılan kademelerin listelenmesi ve istendiğinde tek tıkla yeniden programa dahil edilebilmesi (`allCandidateGrades`) sağlandı.
 - **MEB Ortak Sınav Tarihleri Sabitleme:**
   - MEB tarafından tarihi önceden belirlenen dersler için `isMebExam`, `mebDate` ve `mebSlot` desteği eklendi.
   - 2. Adım ("Okuldaki Dersler") ekranına her ders için `🏛️ MEB` butonu, tarih/seans seçici ve tek tıkla "Tüm Kademelere Uygula" özelliği eklendi.

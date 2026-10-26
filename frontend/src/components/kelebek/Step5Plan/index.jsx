@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   ChevronLeft, Printer, AlertTriangle, CheckCircle2, Building2,
-  RotateCcw, Download, Sparkles, DoorOpen, FileSpreadsheet
+  RotateCcw, Download, Sparkles, DoorOpen, FileSpreadsheet,
+  ShieldCheck, UserX
 } from 'lucide-react';
 import RoomGrid from './RoomGrid';
 import { getSeatLabel, findViolations } from '../../../utils/kelebek/algorithm';
@@ -152,6 +153,62 @@ export default function Step5Plan({ plan, examInfo = {}, onBack, onRegenerate })
             <p className="text-[11px] text-amber-700 mt-0.5">
               İlgili koltukları kırmızı çerçeve ile görebilir, öğrencileri sürükleyip başka koltuklarla takas edebilirsiniz.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Özel Öğrenci Ayrımı Doğrulama Raporu */}
+      {localPlan.separationResults && localPlan.separationResults.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-indigo-600" />
+              <h3 className="font-bold text-slate-900 text-sm">
+                Özel Öğrenci Ayrımı Doğrulama Raporu
+              </h3>
+            </div>
+            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700">
+              {localPlan.separationResults.length} Çift Kontrol Edildi
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {localPlan.separationResults.map((res, idx) => (
+              <div
+                key={res.id || idx}
+                className={`p-3.5 rounded-xl border text-xs flex flex-col justify-between gap-2 ${
+                  res.isDifferentRooms
+                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                    : res.isAdjacent
+                    ? 'bg-rose-50 border-rose-200 text-rose-950'
+                    : 'bg-blue-50/70 border-blue-200 text-blue-950'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-extrabold flex items-center gap-1.5 truncate">
+                    <span className="truncate">{res.student1Name} ({res.student1Class})</span>
+                    <span className="text-slate-400 shrink-0">⟷</span>
+                    <span className="truncate">{res.student2Name} ({res.student2Class})</span>
+                  </div>
+                  {res.isDifferentRooms ? (
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-200 text-emerald-900 text-[10px] font-black shrink-0">
+                      Farklı Salon ✓
+                    </span>
+                  ) : res.isAdjacent ? (
+                    <span className="px-2 py-0.5 rounded-md bg-rose-200 text-rose-900 text-[10px] font-black shrink-0">
+                      Bitişik (Uyarı!)
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-md bg-blue-200 text-blue-900 text-[10px] font-black shrink-0">
+                      Aynı Salon ({res.distance} Sıra Uzak) ✓
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-600 font-medium leading-relaxed">
+                  {res.message}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

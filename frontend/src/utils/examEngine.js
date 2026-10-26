@@ -668,7 +668,7 @@ const evaluatePlacementCost = ({
   }
   cost += (schoolDailyLevelLoad * 28) + (schoolDailyCardsCount * 45);
 
-  // 4. ANA DERS / ZORLUK DENGESİ VE ALAN (11-SAY / 11-EA) ÇAPRAZ BLOKAJ ÖNLEME:
+  // 4. ANA DERS / ZORLUK DENGESİ VE ALAN (11-SAY / 11-EA & 12-SAY / 12-EA) ÇAPRAZ BLOKAJ ÖNLEME:
   // Bir sınıfta o gün zaten bir Ana Ders (isMajor) varsa, yanına 2. sınav olarak
   // okul geneli ağır ortak ders yerine mümkünse daha hafif derslerin gelmesini teşvik et
   if (hasMajorOnDayForLevels && isMultiGradeShared) {
@@ -676,25 +676,29 @@ const evaluatePlacementCost = ({
   }
 
   // Alan Çapraz Blokaj Önleme (Sibling Track Alignment):
-  // Örn: Bir günde 1. seansta Fizik (9,10,11-SAY,12) varken 2. seansa Coğrafya (9,10,11-EA,12) konursa,
-  // o günün hem 1. seansı (11-SAY dolu) hem 2. seansı (11-EA dolu) 11. sınıf ortak derslerine (Tefsir, Hitabet vb.) kapanır!
+  // Örn: Bir günde 1. seansta Fizik (9,10,11-SAY,12-SAY) varken 2. seansa Coğrafya (9,10,11-EA,12-EA) konursa,
+  // o günün hem 1. seansı hem 2. seansı ortak derslere kapanır!
   // Bunu önlemek için, aynı seansta (slot) paralel yerleşimi ödüllendir, farklı seansta çapraz blokajı cezalandır.
-  const has11Say = course.levels.includes('11-SAY');
-  const has11Ea = course.levels.includes('11-EA');
-  if (has11Say !== has11Ea) {
-    const oppositeTrack = has11Say ? '11-EA' : '11-SAY';
-    const sameSlotOpposite = dayPlacements.some(
-      p => Number(p.slot) === Number(slot) && p.levels.includes(oppositeTrack) && !p.levels.includes(has11Say ? '11-SAY' : '11-EA')
-    );
-    const diffSlotOppositeOnly = dayPlacements.some(
-      p => Number(p.slot) !== Number(slot) && p.levels.includes(oppositeTrack) && !p.levels.includes(has11Say ? '11-SAY' : '11-EA')
-    );
-    if (sameSlotOpposite) {
-      cost -= 180; // Aynı seansta 11-SAY ve 11-EA paralel sınav oluyor -> Harika!
-    } else if (diffSlotOppositeOnly) {
-      cost += 900; // Farklı seansta 11-SAY ve 11-EA çaprazlanıp iki seansı birden kapatıyor -> Kaçın!
+  const checkSiblingTrack = (trackSay, trackEa) => {
+    const hasSay = course.levels.includes(trackSay);
+    const hasEa = course.levels.includes(trackEa);
+    if (hasSay !== hasEa) {
+      const oppositeTrack = hasSay ? trackEa : trackSay;
+      const sameSlotOpposite = dayPlacements.some(
+        p => Number(p.slot) === Number(slot) && p.levels.includes(oppositeTrack) && !p.levels.includes(hasSay ? trackSay : trackEa)
+      );
+      const diffSlotOppositeOnly = dayPlacements.some(
+        p => Number(p.slot) !== Number(slot) && p.levels.includes(oppositeTrack) && !p.levels.includes(hasSay ? trackSay : trackEa)
+      );
+      if (sameSlotOpposite) {
+        cost -= 180; // Aynı seansta SAY ve EA paralel sınav oluyor -> Harika!
+      } else if (diffSlotOppositeOnly) {
+        cost += 900; // Farklı seansta SAY ve EA çaprazlanıp iki seansı birden kapatıyor -> Kaçın!
+      }
     }
-  }
+  };
+  checkSiblingTrack('11-SAY', '11-EA');
+  checkSiblingTrack('12-SAY', '12-EA');
 
   // 5. GÜNLER ARASI EŞİTLİK BOZUCU (TIE-BREAKER):
   // Maliyetler eşit olduğunda ilk günlere yığılmak yerine takvime homojen dağılım
@@ -876,7 +880,7 @@ export const solveExamSchedule = ({
   endDate,
   selectedDates = null, // Kullanıcının takvimden bizzat seçtiği günler
   examSlots = [3, 5], // Sınavın yapılacağı ders saatleri (örn: 3. ve 5. ders)
-  grades = ["9", "10", "11-SAY", "11-EA", "12"],
+  grades = ["9", "10", "11-SAY", "11-EA", "12-SAY", "12-EA"],
   subjectsByGrade = {}, // { "9": [ { id, name, isMajor, isMebExam, mebDate, mebSlot }, ... ] }
   teachers = [],
   classrooms = [],
@@ -1233,7 +1237,44 @@ export const DEFAULT_EXAM_SUBJECTS = {
     { id: "s11_8", name: "Felsefe", code: "11FEL", isMajor: false },
     { id: "s11_9", name: "İngilizce", code: "ING1", isMajor: false }
   ],
+  "12-SAY": [
+    // 🔬 12. SINIF SAYISAL: Ana Dersler: Matematik, Fizik, Kimya, Biyoloji, Edebiyat
+    { id: "s12s_1", name: "Türk Dili ve Edebiyatı", code: "EDEBİY", isMajor: true },
+    { id: "s12s_2", name: "Matematik", code: "MAT", isMajor: true },
+    { id: "s12s_3", name: "Fizik", code: "FİZİK", isMajor: true },
+    { id: "s12s_4", name: "Kimya", code: "KMYA", isMajor: true },
+    { id: "s12s_5", name: "Biyoloji", code: "BİYO", isMajor: true },
+    { id: "s12s_6", name: "T.C. İnkılap Tarihi ve Atatürkçülük", code: "INKILA", isMajor: false },
+    { id: "s12s_7", name: "İngilizce", code: "ING1", isMajor: false },
+    { id: "s12s_8", name: "Dinler Tarihi", code: "DINT", isMajor: false },
+    { id: "s12s_9", name: "Kur'an-ı Kerim", code: "KURAN", isMajor: false },
+    { id: "s12s_10", name: "Kelam", code: "KELAM", isMajor: false },
+    { id: "s12s_11", name: "Mesleki Arapça", code: "MARP11", isMajor: false },
+    { id: "s12s_12", name: "İslam Kültür ve Medeniyeti", code: "IKMED", isMajor: false },
+    { id: "s12s_13", name: "Fen Bilimleri Tarihi ve Uygulamaları", code: "FENT", isMajor: false },
+    { id: "s12s_14", name: "Astronomi ve Uzay Bilimleri", code: "AUB1", isMajor: false }
+  ],
+  "12-EA": [
+    // ⚖️ 12. SINIF EŞİT AĞIRLIK: Ana Dersler: Matematik, Edebiyat
+    { id: "s12e_1", name: "Türk Dili ve Edebiyatı", code: "EDEBİY", isMajor: true },
+    { id: "s12e_2", name: "Matematik", code: "MAT", isMajor: true },
+    { id: "s12e_3", name: "Coğrafya", code: "COĞRFY", isMajor: false },
+    { id: "s12e_4", name: "Seçmeli Türk Dili ve Edebiyatı", code: "STEDB", isMajor: false },
+    { id: "s12e_5", name: "T.C. İnkılap Tarihi ve Atatürkçülük", code: "INKILA", isMajor: false },
+    { id: "s12e_6", name: "Çağdaş Türk ve Dünya Tarihi", code: "CTDT2", isMajor: false },
+    { id: "s12e_7", name: "İngilizce", code: "ING1", isMajor: false },
+    { id: "s12e_8", name: "Dinler Tarihi", code: "DINT", isMajor: false },
+    { id: "s12e_9", name: "Kur'an-ı Kerim", code: "KURAN", isMajor: false },
+    { id: "s12e_10", name: "Kelam", code: "KELAM", isMajor: false },
+    { id: "s12e_11", name: "Mesleki Arapça", code: "MARP11", isMajor: false },
+    { id: "s12e_12", name: "İslam Kültür ve Medeniyeti", code: "IKMED", isMajor: false },
+    { id: "s12e_13", name: "Temel Matematik", code: "T.MAT2", isMajor: false },
+    { id: "s12e_14", name: "Proje Tasarımı ve Uygulamaları", code: "PROJE", isMajor: false },
+    { id: "s12e_15", name: "Adab-ı Muaşeret", code: "A.MUA2", isMajor: false },
+    { id: "s12e_16", name: "Girişimcilik", code: "GIRIŞ1", isMajor: false }
+  ],
   "12": [
+    // Geriye dönük uyumluluk
     { id: "s12_1", name: "Türk Dili ve Edebiyatı", code: "EDEBİY", isMajor: true },
     { id: "s12_2", name: "Matematik", code: "MAT", isMajor: true },
     { id: "s12_3", name: "Fizik", code: "FİZİK", isMajor: true },
@@ -1307,11 +1348,11 @@ export const solveSupervisors = ({
         const gradeMatch = (classroom.name || '').match(/^(\d+)/);
         if (gradeMatch) {
           const baseGrade = gradeMatch[1];
-          if (baseGrade === '11') {
+          if (baseGrade === '11' || baseGrade === '12') {
             const courseSubjects = (classroom.courses || []).map(co => (co.subject || '').toUpperCase());
-            const isSay = courseSubjects.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY'));
-            const candidateGrade = isSay ? '11-SAY' : '11-EA';
-            grade = examSchedule[candidateGrade] ? candidateGrade : (examSchedule['11'] ? '11' : candidateGrade);
+            const isSay = courseSubjects.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY')) || (classroom.name || '').toUpperCase().includes('SAY');
+            const candidateGrade = isSay ? `${baseGrade}-SAY` : `${baseGrade}-EA`;
+            grade = examSchedule[candidateGrade] ? candidateGrade : (examSchedule[baseGrade] ? baseGrade : candidateGrade);
           } else {
             grade = baseGrade;
           }

@@ -1,58 +1,122 @@
 // frontend/src/pages/MobileTeacherView.jsx
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
+import { useCloudSyncStore } from '../services/cloudSyncService';
+import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import { calculateTeacherDutyDay } from '../utils/dutyDayCalculator';
 import { QRCodeSVG } from '../utils/qrCodeGenerator';
-import { 
-  Calendar, 
-  Clock, 
-  GraduationCap, 
-  ShieldCheck, 
-  Share2, 
-  ArrowLeft, 
-  Search, 
-  Coffee, 
-  Sparkles, 
-  Check, 
-  BookOpen, 
+import {
+  Calendar,
+  GraduationCap,
+  ShieldCheck,
+  Share2,
+  ArrowLeft,
+  Search,
+  Coffee,
+  Sparkles,
+  Check,
   Printer,
-  QrCode
+  QrCode,
+  FileCheck,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function MobileTeacherView() {
-  const { teacherId: paramTeacherId } = useParams();
+  const { shareCode: paramShareCode, teacherId: paramTeacherId } = useParams();
   const navigate = useNavigate();
-  const { teachers, classrooms, timetable, settings } = useAppStore();
+  const localStore = useAppStore();
+  const cloudShareCode = useCloudSyncStore((s) => s.schoolRecord?.share_code);
 
-  const days = settings?.days || ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"];
+  const [remoteSchool, setRemoteSchool] = useState(null);
+  const [loadingRemote, setLoadingRemote] = useState(Boolean(paramShareCode));
+  const [remoteError, setRemoteError] = useState('');
+
+  // 🌐 URL'de :shareCode varsa Supabase RPC üzerinden şifresiz canlı veriyi çek
+  useEffect(() => {
+    if (!paramShareCode) {
+      setLoadingRemote(false);
+      return;
+    }
+    if (!isSupabaseConfigured || !supabase) {
+      setRemoteError('Bulut bağlantısı yapılandırılmadığı için canlı paylaşım kodu okunamadı.');
+      setLoadingRemote(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingRemote(true);
+    setRemoteError('');
+
+    supabase
+      .rpc('get_published_school_by_share_code', { p_share_code: paramShareCode })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data || !data.published_mobile) {
+          setRemoteError('Bu paylaşım koduna ait güncel okul programı bulunamadı veya bağlantı yenilenmiş.');
+        } else {
+          setRemoteSchool(data.published_mobile);
+        }
+        setLoadingRemote(false);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRemoteError('Canlı program yüklenirken ağ hatası oluştu.');
+          setLoadingRemote(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [paramShareCode]);
+
+  const activeSource = remoteSchool || localStore;
+  const teachers = activeSource?.teachers || [];
+  const classrooms = activeSource?.classrooms || [];
+  const timetable = activeSource?.timetable || {};
+  const settings = activeSource?.settings || {};
+  const examSupervisors = activeSource?.examSupervisors || null;
+
+  const effectiveShareCode = paramShareCode || cloudShareCode || '';
+
+  const days = settings?.days || ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'];
   const numPeriods = Number(settings?.periodsPerDay) || 8;
   const periodsArray = Array.from({ length: numPeriods }, (_, i) => i + 1);
 
   // Bugünün gün adını bul (Hafta sonuysa Pazartesi)
   const getTodayDayName = () => {
-    const dayIndex = new Date().getDay(); // 0: Pazar, 1: Pazartesi, ...
-    const dayMap = { 1: "Pazartesi", 2: "Salı", 3: "Çarşamba", 4: "Perşembe", 5: "Cuma" };
-    return dayMap[dayIndex] || "Pazartesi";
+    const dayIndex = new Date().getDay();
+    const dayMap = { 1: 'Pazartesi', 2: 'Salı', 3: 'Çarşamba', 4: 'Perşembe', 5: 'Cuma' };
+    return dayMap[dayIndex] || 'Pazartesi';
   };
 
   const [activeDay, setActiveDay] = useState(getTodayDayName());
   const [selectedTeacherId, setSelectedTeacherId] = useState(paramTeacherId || teachers[0]?.id || '');
-  const [searchQuery, setSearchQuery] = useState('');
   const [copied, setCopied] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
 
+  // Uzaktan öğretmen listesi yüklendiğinde seçili öğretmeni senkronize et
+  useEffect(() => {
+    if (paramTeacherId && teachers.some((t) => t.id === paramTeacherId)) {
+      setSelectedTeacherId(paramTeacherId);
+    } else if (!selectedTeacherId && teachers[0]?.id) {
+      setSelectedTeacherId(teachers[0].id);
+    }
+  }, [teachers, paramTeacherId, selectedTeacherId]);
+
   // Aktif seçili öğretmen
   const currentTeacher = useMemo(() => {
-    return teachers.find(t => t.id === selectedTeacherId) || teachers[0];
+    return teachers.find((t) => t.id === selectedTeacherId) || teachers[0];
   }, [teachers, selectedTeacherId]);
 
   // Öğretmenin toplam yükü
   const teacherLoad = useMemo(() => {
     if (!currentTeacher) return 0;
     let total = 0;
-    classrooms.forEach(c => {
-      (c.courses || []).forEach(co => {
+    classrooms.forEach((c) => {
+      (c.courses || []).forEach((co) => {
         if (co.teacherId === currentTeacher.id) total += Number(co.hoursPerWeek) || 0;
       });
     });
@@ -69,18 +133,20 @@ export default function MobileTeacherView() {
   const teacherSchedule = useMemo(() => {
     if (!currentTeacher) return {};
     const schedule = {};
-    days.forEach(d => { schedule[d] = {}; });
+    days.forEach((d) => {
+      schedule[d] = {};
+    });
 
-    Object.keys(timetable).forEach(cId => {
-      const cName = classrooms.find(c => c.id === cId)?.name || 'Sınıf';
-      days.forEach(day => {
+    Object.keys(timetable).forEach((cId) => {
+      const cName = classrooms.find((c) => c.id === cId)?.name || 'Sınıf';
+      days.forEach((day) => {
         const slots = timetable[cId]?.[day] || [];
-        slots.forEach(slot => {
+        slots.forEach((slot) => {
           if (slot.teacherId === currentTeacher.id) {
             schedule[day][slot.period] = {
               subject: slot.subject,
               className: cName,
-              classId: cId
+              classId: cId,
             };
           }
         });
@@ -90,14 +156,34 @@ export default function MobileTeacherView() {
     return schedule;
   }, [currentTeacher, timetable, classrooms, days]);
 
+  // 🎓 Öğretmenin Ortak Sınav Gözetmenlik Görevleri
+  const supervisorDuties = useMemo(() => {
+    if (!currentTeacher || !examSupervisors || typeof examSupervisors !== 'object') return [];
+    const list = [];
+    Object.entries(examSupervisors).forEach(([date, slotsObj]) => {
+      Object.entries(slotsObj || {}).forEach(([slot, roomsObj]) => {
+        Object.entries(roomsObj || {}).forEach(([cId, tId]) => {
+          if (tId === currentTeacher.id) {
+            const cName = classrooms.find((c) => c.id === cId)?.name || cId;
+            list.push({ date, slot, className: cName });
+          }
+        });
+      });
+    });
+    return list.sort((a, b) => a.date.localeCompare(b.date) || Number(a.slot) - Number(b.slot));
+  }, [currentTeacher, examSupervisors, classrooms]);
+
   // Aktif günün dersleri
   const activeDayLessons = teacherSchedule[activeDay] || {};
   const activeDayLessonCount = Object.keys(activeDayLessons).length;
 
-  // Paylaşım linki
-  const currentUrl = typeof window !== 'undefined' 
-    ? `${window.location.origin}/mobile/teacher/${currentTeacher?.id || ''}`
-    : '';
+  // Paylaşım linki (Bulut shareCode varsa her telefondan açılan canlı linki üretir!)
+  const currentUrl =
+    typeof window !== 'undefined'
+      ? effectiveShareCode
+        ? `${window.location.origin}/mobile/s/${effectiveShareCode}/teacher/${currentTeacher?.id || ''}`
+        : `${window.location.origin}/mobile/teacher/${currentTeacher?.id || ''}`
+      : '';
 
   const handleCopyLink = () => {
     if (navigator?.clipboard) {
@@ -107,27 +193,61 @@ export default function MobileTeacherView() {
     }
   };
 
-  // Öğretmen arama filtresi
-  const filteredTeachers = teachers.filter(t => 
-    t.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    t.branch.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const handleTeacherChange = (newTeacherId) => {
+    setSelectedTeacherId(newTeacherId);
+    if (paramShareCode) {
+      navigate(`/mobile/s/${paramShareCode}/teacher/${newTeacherId}`);
+    } else if (effectiveShareCode) {
+      navigate(`/mobile/s/${effectiveShareCode}/teacher/${newTeacherId}`);
+    } else {
+      navigate(`/mobile/teacher/${newTeacherId}`);
+    }
+  };
+
+  if (loadingRemote) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-6 gap-3">
+        <Loader2 size={28} className="text-indigo-400 animate-spin" />
+        <span className="text-xs font-bold text-slate-300">Canlı okul ders programı yükleniyor...</span>
+      </div>
+    );
+  }
+
+  if (remoteError) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-6">
+        <div className="max-w-sm w-full bg-slate-800 border border-slate-700 rounded-3xl p-6 text-center space-y-4">
+          <AlertTriangle size={32} className="text-amber-400 mx-auto" />
+          <h2 className="text-sm font-black text-white">Program Görüntülenemedi</h2>
+          <p className="text-xs text-slate-300 leading-relaxed">{remoteError}</p>
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer"
+          >
+            Ana Sayfaya Dön
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-16 print:bg-white print:text-black print:pb-0">
-      
       {/* 📱 MOBİL ÜST BAR (APP HEADER) */}
       <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3.5 print:hidden">
         <div className="max-w-md mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => navigate('/timetable')}
-              className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white transition-all cursor-pointer"
-              title="Ana Çarşaf Tablosuna Dön"
-            >
-              <ArrowLeft size={16} />
-            </button>
+            {!paramShareCode && (
+              <button
+                type="button"
+                onClick={() => navigate('/timetable')}
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white transition-all cursor-pointer"
+                title="Ana Çarşaf Tablosuna Dön"
+              >
+                <ArrowLeft size={16} />
+              </button>
+            )}
             <div>
               <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
                 {settings?.schoolName || 'Hz. Ayşe Kız AİHL'}
@@ -162,8 +282,7 @@ export default function MobileTeacherView() {
       </header>
 
       <div className="max-w-md mx-auto p-4 space-y-4">
-
-        {/* 🔍 ÖĞRETMEN SEÇİCİ DROPDOWN / ARAMA */}
+        {/* 🔍 ÖĞRETMEN SEÇİCİ DROPDOWN */}
         <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3 print:hidden">
           <div className="flex items-center gap-2 mb-2">
             <Search size={14} className="text-slate-400" />
@@ -171,13 +290,10 @@ export default function MobileTeacherView() {
           </div>
           <select
             value={selectedTeacherId}
-            onChange={(e) => {
-              setSelectedTeacherId(e.target.value);
-              navigate(`/mobile/teacher/${e.target.value}`);
-            }}
+            onChange={(e) => handleTeacherChange(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 text-white font-bold text-xs rounded-xl p-2.5 outline-none focus:border-blue-500 cursor-pointer"
           >
-            {teachers.map(t => (
+            {teachers.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name} ({t.branch})
               </option>
@@ -202,7 +318,7 @@ export default function MobileTeacherView() {
               </div>
 
               {/* HIZLI QR KOD KÜÇÜK GÖSTERGE */}
-              <div 
+              <div
                 onClick={() => setShowQRModal(true)}
                 className="bg-white p-1.5 rounded-xl cursor-pointer hover:scale-105 transition-transform shadow-md print:hidden"
                 title="Büyütmek için tıklayın"
@@ -211,7 +327,7 @@ export default function MobileTeacherView() {
               </div>
             </div>
 
-            {/* 🛡️ NÖBET GÜNÜ MÜHRÜ (FAZ 3 ENTEGRASYONU) */}
+            {/* 🛡️ NÖBET GÜNÜ MÜHRÜ */}
             {dutyDay ? (
               <div className="bg-indigo-950/60 border border-indigo-700/60 rounded-2xl p-3 flex items-center gap-2.5 text-indigo-200">
                 <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
@@ -219,9 +335,7 @@ export default function MobileTeacherView() {
                 </div>
                 <div>
                   <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-300">Resmi Nöbet Görevi</div>
-                  <div className="text-xs font-black text-white">
-                    Nöbet Günü: {dutyDay}
-                  </div>
+                  <div className="text-xs font-black text-white">Nöbet Günü: {dutyDay}</div>
                 </div>
               </div>
             ) : (
@@ -234,7 +348,7 @@ export default function MobileTeacherView() {
 
         {/* 📅 GÜN SEÇİCİ SEKMELER (DAY PILLS) */}
         <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar print:hidden">
-          {days.map(day => {
+          {days.map((day) => {
             const hasLessons = Object.keys(teacherSchedule[day] || {}).length > 0;
             const isSelected = activeDay === day;
             const isToday = getTodayDayName() === day;
@@ -245,8 +359,8 @@ export default function MobileTeacherView() {
                 type="button"
                 onClick={() => setActiveDay(day)}
                 className={`flex-1 min-w-[70px] py-2 px-1 rounded-2xl text-center text-xs font-bold transition-all cursor-pointer border ${
-                  isSelected 
-                    ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-900/30' 
+                  isSelected
+                    ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-900/30'
                     : hasLessons
                     ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
                     : 'bg-slate-900/60 text-slate-500 border-slate-800/80 opacity-60'
@@ -263,7 +377,7 @@ export default function MobileTeacherView() {
           })}
         </div>
 
-        {/* ⏰ AKTİF GÜNÜN ZAMAN ÇİZELGESİ (TIMELINE DERS KARTLARI) */}
+        {/* ⏰ AKTİF GÜNÜN ZAMAN ÇİZELGESİ */}
         <div className="space-y-2.5">
           <div className="flex justify-between items-center px-1">
             <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -287,10 +401,9 @@ export default function MobileTeacherView() {
             </div>
           ) : (
             <div className="space-y-2">
-              {periodsArray.map(p => {
+              {periodsArray.map((p) => {
                 const lesson = activeDayLessons[p];
 
-                // Eğer o saatte ders varsa
                 if (lesson) {
                   return (
                     <div
@@ -322,8 +435,9 @@ export default function MobileTeacherView() {
                   );
                 }
 
-                // Dersi olan bir günde aradaki boş ders saatleri (pencere)
-                const allPeriods = Object.keys(activeDayLessons).map(Number).sort((a, b) => a - b);
+                const allPeriods = Object.keys(activeDayLessons)
+                  .map(Number)
+                  .sort((a, b) => a - b);
                 const minP = allPeriods[0];
                 const maxP = allPeriods[allPeriods.length - 1];
 
@@ -353,6 +467,29 @@ export default function MobileTeacherView() {
           )}
         </div>
 
+        {/* 🎓 ORTAK SINAV GÖZETMENLİK GÖREVLERİ (Varsa Gösterilir) */}
+        {supervisorDuties.length > 0 && (
+          <div className="bg-slate-800/80 border border-amber-500/30 rounded-2xl p-4 space-y-2.5">
+            <h3 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+              <FileCheck size={14} />
+              <span>Ortak Sınav Gözetmenlik Görevleri ({supervisorDuties.length})</span>
+            </h3>
+            <div className="space-y-1.5">
+              {supervisorDuties.map((d, idx) => (
+                <div
+                  key={idx}
+                  className="flex justify-between items-center text-xs bg-slate-900/80 border border-slate-800 px-3 py-2 rounded-xl"
+                >
+                  <span className="font-bold text-slate-200">
+                    {d.date} • {d.slot}. Ders
+                  </span>
+                  <span className="font-black text-amber-400">{d.className} Salonu</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 🖨️ YAZDIR / PAYLAŞ BUTONLARI */}
         <div className="pt-2 flex gap-2 print:hidden">
           <button
@@ -372,7 +509,6 @@ export default function MobileTeacherView() {
             <span>Yazdır / PDF</span>
           </button>
         </div>
-
       </div>
 
       {/* 📱 QR KOD MODAL PENCERESİ */}
@@ -393,7 +529,7 @@ export default function MobileTeacherView() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs font-black text-white">{currentTeacher.name}</div>
+              <div className="text-xs font-black text-white">{currentTeacher?.name}</div>
               <div className="text-[11px] text-blue-400 font-bold">
                 {dutyDay ? `Nöbet Günü: ${dutyDay}` : 'Ders Programı'}
               </div>
@@ -409,7 +545,6 @@ export default function MobileTeacherView() {
           </div>
         </div>
       )}
-
     </div>
   );
 }

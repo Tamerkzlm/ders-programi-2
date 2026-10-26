@@ -355,8 +355,24 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
         for k in range(len(slot_expr) - 1):
             model.Add(slot_expr[k] + 1 <= slot_expr[k + 1])
 
-    # ---- Kilitli hücreler
+    # ---- Kilitli hücreler (pinnedSlots) -------------------------------------
+    # Single‑hour pins (legacy) are kept unchanged.  Pins that contain a `groupId`
+    # represent a 2‑hour block and must appear as a pair (period p and p+1) on the
+    # same day and class.  The solver forces a 2‑hour activity (duration == 2) to
+    # start at the first period of the pair.
+    pins_by_group: Dict[str, List[dict]] = {}
     for pin in (pinned_slots or []):
+        gid = pin_field(pin, "groupId")
+        if gid:
+            pins_by_group.setdefault(gid, []).append({
+                "classId": pin_field(pin, "classId"),
+                "day": pin_field(pin, "day"),
+                "period": int(pin_field(pin, "period") or 0),
+                "subject": pin_field(pin, "subject") or "",
+                "teacherId": pin_field(pin, "teacherId"),
+            })
+            continue
+        # ---- legacy single‑hour pin ------------------------------------------
         c_id, d = pin_field(pin, "classId"), pin_field(pin, "day")
         p, sub, t_id = int(pin_field(pin, "period") or 0), pin_field(pin, "subject") or "", pin_field(pin, "teacherId")
         matching = [a for a in by_class.get(c_id, [])
@@ -367,6 +383,36 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
             model.Add(sum(cov) == 1)
         else:
             warnings.append(f"Kilitli hücre eşleşmedi ve yok sayıldı: {sub} ({d} {p}. saat).")
+
+    # ---- 2‑hour block pins -------------------------------------------------
+    for gid, pins in pins_by_group.items():
+        if len(pins) != 2:
+            warnings.append(f"Kilit grubu {gid} hatalı: beklenen 2 hücre, bulundu {len(pins)}.")
+            continue
+        # ensure same class, day and adjacent periods
+        pins_sorted = sorted(pins, key=lambda x: x["period"])
+        p1, p2 = pins_sorted[0]["period"], pins_sorted[1]["period"]
+        if p2 != p1 + 1 or pins_sorted[0]["day"] != pins_sorted[1]["day"] or pins_sorted[0]["classId"] != pins_sorted[1]["classId"]:
+            warnings.append(f"Kilit grubu {gid} ardışık değil veya aynı sınıf/gün içinde değil.")
+            continue
+        c_id = pins_sorted[0]["classId"]
+        d = pins_sorted[0]["day"]
+        sub = pins_sorted[0]["subject"]
+        t_id = pins_sorted[0]["teacherId"]
+        # find a 2‑hour activity that matches the subject (and teacher if given)
+        matching = [a for a in by_class.get(c_id, [])
+                    if a["subject"].strip().lower() == sub.strip().lower()
+                    and (not t_id or a["teacher_id"] == t_id)
+                    and a["duration"] == 2]
+        if not matching:
+            warnings.append(f"Kilit grubu {gid} için 2‑saatlik aktivite bulunamadı: {sub} ({d}).")
+            continue
+        # force exactly one 2-hour activity to start at the first period of the block
+        valid_vars = [x[a["id"], d, p1] for a in matching if (d, p1) in opts[a["id"]]]
+        if valid_vars:
+            model.Add(sum(valid_vars) == 1)
+        else:
+            warnings.append(f"Kilit grubu {gid} için (gün: {d}, saat: {p1}) başlangıç seçeneği mevcut değil.")
 
     # ---- C kademesi: fen/matematik derslerinin son iki saate kalmaması
     if o["avoid_stem_late"]:
@@ -450,12 +496,21 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
                 day_gaps = sum(s.values()) + sum(e.values()) - P * h - hours
 
                 if prof["is_part_time"]:
-                    terms["rules"].append(2 * day_gaps)  # 1-2 gün gelenler penceresiz olmalı
+                    terms["rules"].append(4 * day_gaps)  # 1-2 gün gelenler penceresiz olmalı
                 elif o["minimize_gaps"]:
+                    # 📈 Kademeli & Konveks Pencere Cezası:
+                    # 1 pencere = 1 birim ceza
+                    # 2 pencere = 1 + 2 = 3 birim ceza
+                    # 3 pencere ve üzeri = her biri için +4 ek artırımlı ceza (öğretmene 3+ pencere yığılmasını engeller)
                     terms["gaps"].append(day_gaps)
-                    extra = model.NewIntVar(0, P, f"gx_{t.id}_{d}")
-                    model.Add(extra >= day_gaps - 1)
-                    terms["gaps"].append(2 * extra)
+                    extra1 = model.NewIntVar(0, P, f"gx1_{t.id}_{d}")
+                    model.Add(extra1 >= day_gaps - 1)
+                    terms["gaps"].append(2 * extra1)
+
+                    extra2 = model.NewIntVar(0, P, f"gx2_{t.id}_{d}")
+                    model.Add(extra2 >= day_gaps - 2)
+                    terms["gaps"].append(4 * extra2)
+
                 if soft_rules and o["enforce_max_gaps"]:
                     gx = model.NewIntVar(0, P, f"gex_{t.id}_{d}")
                     model.Add(gx >= day_gaps - o["max_gaps_per_day"])

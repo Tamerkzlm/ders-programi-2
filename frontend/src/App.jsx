@@ -1,11 +1,14 @@
 // frontend/src/App.jsx
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import AppLayout from './components/layout/AppLayout'; 
 import ModuleHub from './pages/ModuleHub';
+import { initCloudSyncListeners } from './services/cloudSyncService';
+import { preWarmSolverBackend } from './services/supabaseClient';
 
 // 🚀 Yüksek Performanslı Sayfa Bazlı Kod Bölme (Code Splitting)
+const AuthPage = lazy(() => import('./pages/AuthPage'));
 const KelebekPlanner = lazy(() => import('./pages/KelebekPlanner'));
 const DykPlanner = lazy(() => import('./pages/DykPlanner'));
 const ExamPlanner = lazy(() => import('./pages/ExamPlanner'));
@@ -31,6 +34,11 @@ const PageLoading = () => (
 );
 
 export default function App() {
+  useEffect(() => {
+    initCloudSyncListeners();
+    preWarmSolverBackend();
+  }, []);
+
   return (
     <ErrorBoundary>
       <Router>
@@ -38,6 +46,9 @@ export default function App() {
           <Routes>
             {/* 🌟 1. ANA AÇILIŞ PORTALI (4 Büyük Modül: Ders Programı, DYK, Kelebek, Sınav) */}
             <Route path="/" element={<ModuleHub />} />
+
+            {/* 🔐 ÇOKLU OKUL GİRİŞ / KAYIT VE BULUT YEDEKLEME */}
+            <Route path="/auth" element={<AuthPage />} />
 
             {/* 🎯 2. DYK (DESTEKLEME VE YETİŞTİRME KURSU) MODÜLÜ */}
             <Route path="/dyk" element={<DykPlanner />} />
@@ -70,9 +81,11 @@ export default function App() {
               <Route path="/export" element={<Export />} />
             </Route>
             
-            {/* 📱 Mobil Öğretmen Web Portalı (Sidebar'sız Fullscreen App View) */}
+            {/* 📱 Mobil Öğretmen Web Portalı (Sidebar'sız Fullscreen App View & Canlı Paylaşım) */}
             <Route path="/mobile" element={<MobileTeacherView />} />
             <Route path="/mobile/teacher/:teacherId" element={<MobileTeacherView />} />
+            <Route path="/mobile/s/:shareCode" element={<MobileTeacherView />} />
+            <Route path="/mobile/s/:shareCode/teacher/:teacherId" element={<MobileTeacherView />} />
 
             {/* Tanımsız bir URL girilirse ana portala yönlendir */}
             <Route path="*" element={<Navigate to="/" replace />} />

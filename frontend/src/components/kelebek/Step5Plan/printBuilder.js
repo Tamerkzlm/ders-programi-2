@@ -131,7 +131,11 @@ function buildGridHTML(grid, room) {
   let colHeaders = colLetters.map((_, ci) => {
     const l = String.fromCharCode(65 + ci * 2);
     const r = String.fromCharCode(65 + ci * 2 + 1);
-    return `<th colspan="2" style="text-align:center;font-size:8px;padding:2px">${l}/${r}</th>`;
+    const bankHeader = `<th colspan="2" style="text-align:center;font-size:8px;font-weight:bold;background:#e2e8f0;border:1.5px solid #64748b;padding:2px 3px">${l} / ${r}</th>`;
+    if (ci < room.cols - 1) {
+      return bankHeader + `<th style="width:14px;border:none !important;background:transparent !important;padding:0"></th>`;
+    }
+    return bankHeader;
   }).join('');
 
   let gridRows = grid.map((row, ri) => {
@@ -146,12 +150,16 @@ function buildGridHTML(grid, room) {
       const rLabel = r
         ? `<b style="font-size:7.5px">${getSeatLabel(ci, ri, 1)}</b><br/><span style="font-size:7px;font-weight:600">${r.adSoyad}</span><br/><span style="font-size:6.5px;color:#475569">${(r.sinif||'').toUpperCase()}</span>`
         : '';
-      return `
-        <td style="background:${lBg};text-align:center;padding:2px 1px;line-height:1.25">${lLabel}</td>
-        <td style="background:${rBg};text-align:center;padding:2px 1px;line-height:1.25">${rLabel}</td>
+      const bankCells = `
+        <td style="background:${lBg};text-align:center;padding:2px 1px;line-height:1.25;border-top:1.5px solid #64748b;border-bottom:1.5px solid #64748b;border-left:1.5px solid #64748b;border-right:1px dashed #cbd5e1">${lLabel}</td>
+        <td style="background:${rBg};text-align:center;padding:2px 1px;line-height:1.25;border-top:1.5px solid #64748b;border-bottom:1.5px solid #64748b;border-right:1.5px solid #64748b;border-left:none">${rLabel}</td>
       `;
+      if (ci < room.cols - 1) {
+        return bankCells + `<td style="width:14px;border:none !important;background:#f8fafc !important;border-left:1px dashed #cbd5e1 !important;border-right:1px dashed #cbd5e1 !important;padding:0;text-align:center"></td>`;
+      }
+      return bankCells;
     }).join('');
-    return `<tr><td style="font-size:7.5px;font-weight:bold;text-align:right;padding:1px 3px;border:none;width:14px">${ri+1}</td>${cells}</tr>`;
+    return `<tr><td style="font-size:7.5px;font-weight:bold;text-align:right;padding:1px 3px;border:none !important;width:14px;color:#64748b">${ri+1}</td>${cells}</tr>`;
   }).join('');
 
   return `
@@ -161,8 +169,8 @@ function buildGridHTML(grid, room) {
         <div style="width:12px;flex-shrink:0;background:#eff6ff;border:2px solid #93c5fd;border-radius:3px;display:flex;align-items:center;justify-content:center">
           <span style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:6.5px;font-weight:bold;color:#3b82f6;letter-spacing:2px">CAM</span>
         </div>
-        <table style="font-size:7px;table-layout:fixed;width:100%">
-          <thead><tr><th style="width:14px;border:none"></th>${colHeaders}</tr></thead>
+        <table style="font-size:7px;table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0">
+          <thead><tr><th style="width:14px;border:none !important;background:transparent !important"></th>${colHeaders}</tr></thead>
           <tbody>${gridRows}</tbody>
         </table>
       </div>

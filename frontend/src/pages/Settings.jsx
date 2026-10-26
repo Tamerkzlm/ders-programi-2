@@ -9,7 +9,9 @@ import {
   UserCheck, 
   Building2, 
   RefreshCw, 
-  Trash2
+  Trash2,
+  GraduationCap,
+  Download
 } from 'lucide-react';
 import DemoDataPromptModal from '../components/common/DemoDataPromptModal';
 
@@ -19,7 +21,9 @@ export default function Settings() {
     updateSettings, 
     demoDataChoice, 
     loadHzAyseDemoData, 
+    loadAbdiIpekciDemoData,
     clearDataForManualEntry, 
+    downloadSchoolBackup,
     teachers,
     classrooms
   } = useAppStore();
@@ -60,8 +64,18 @@ export default function Settings() {
     loadHzAyseDemoData();
     setSchoolName("Hz. Ayşe Kız Anadolu İmam Hatip Lisesi");
     setPrincipalName("Cemil Murat Kuru");
+    setPeriodsPerDay(8);
     setSuccessMessage('Hz. Ayşe Kız AİHL örnek verileri yüklendi.');
     setTimeout(() => setSuccessMessage(''), 3000);
+  };
+
+  const handleLoadAbdi = () => {
+    loadAbdiIpekciDemoData(true);
+    setSchoolName("Abdi İpekçi Ortaokulu");
+    setPrincipalName("Taner Eryılmaz");
+    setPeriodsPerDay(7);
+    setSuccessMessage('Abdi İpekçi Ortaokulu gerçek verileri (35 öğretmen, 20 şube, günde 7 saat) yüklendi.');
+    setTimeout(() => setSuccessMessage(''), 3500);
   };
 
   const handleClearData = () => {
@@ -113,40 +127,60 @@ export default function Settings() {
       )}
 
       {/* OKUL VERİ SETİ KONTROLÜ (DAİMA AKTİF) */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0 border border-indigo-100">
             <Building2 size={20} />
           </div>
           <div>
             <div className="text-xs font-bold text-slate-800">
-              {demoDataChoice === 'demo' || demoDataChoice === null 
-                ? 'Hz. Ayşe Kız AİHL Örnek Veri Seti' 
-                : 'Manuel Veri Giriş Modu'}
+              {settings?.schoolName || 'Okul Ders Programı'}
             </div>
             <div className="text-[11px] text-slate-500 font-medium">
-              {teachers.length} Öğretmen • {classrooms.length} Sınıf
+              {teachers.length} Öğretmen • {classrooms.length} Sınıf • Günde {settings?.periodsPerDay || 8} Saat
             </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
           <button
             type="button"
             onClick={handleLoadDemo}
-            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-xs"
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition-all cursor-pointer shadow-xs"
+            title="Hz. Ayşe Kız AİHL verilerini yükle (mevcut okul kaydedilir)"
           >
             <RefreshCw size={13} />
-            <span>Hz. Ayşe Örnek Verilerini Yükle</span>
+            <span>Hz. Ayşe'yi Yükle</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleLoadAbdi}
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition-all cursor-pointer shadow-xs"
+            title="Abdi İpekçi Ortaokulu verilerini yükle (mevcut okul kaydedilir)"
+          >
+            <GraduationCap size={14} />
+            <span>Abdi İpekçi'yi Yükle</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={downloadSchoolBackup}
+            className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-xs px-3 py-2 rounded-xl transition-all cursor-pointer"
+            title="Açık olan okulun verilerini JSON olarak indir"
+          >
+            <Download size={13} />
+            <span>Yedeği İndir (JSON)</span>
           </button>
 
           <button
             type="button"
             onClick={handleClearData}
-            className="flex items-center gap-1.5 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 font-bold text-xs px-3.5 py-2 rounded-xl transition-all cursor-pointer"
+            className="flex items-center gap-1.5 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 font-bold text-xs px-3 py-2 rounded-xl transition-all cursor-pointer"
+            title="Sıfırdan manuel moda geç"
           >
             <Trash2 size={13} />
-            <span>Verileri Sıfırla (Manuel Mod)</span>
+            <span>Sıfırla</span>
           </button>
         </div>
       </div>

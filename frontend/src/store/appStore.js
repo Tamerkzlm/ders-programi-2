@@ -20,6 +20,13 @@ import {
   enrichCoursesWithCodes
 } from './seedData';
 
+import {
+  ABDI_SETTINGS,
+  ABDI_TEACHERS,
+  ABDI_CLASSROOMS,
+  ABDI_TIMETABLE
+} from './seedDataAbdi';
+
 
 // 📊 CANLI METRİK VE PENCERE (BOŞLUK) HESAPLAMA MOTORU
 // Manuel sürükle-bırak, silme veya taşıma işlemlerinde anında çalışarak dağıtım raporunu günceller.
@@ -769,6 +776,23 @@ export const useAppStore = create(
         }
       }),
 
+      // 🆕 Yeni Pin Ekleme (Grup ID destekli)
+      addPrePin: (slot) => set((state) => ({
+        pinnedSlots: [...state.pinnedSlots, { ...slot }]
+      })),
+
+      // 🆕 Grup ID'ye göre Pin Grubunu Kaldır
+      removePinGroup: (groupId) => set((state) => ({
+        pinnedSlots: state.pinnedSlots.filter((p) => p.groupId !== groupId)
+      })),
+
+      // 🆕 Kullanılmayan sınıflara ait pinleri temizle
+      pruneStalePins: (validClassIds) => set((state) => ({
+        pinnedSlots: state.pinnedSlots.filter((p) => validClassIds.includes(p.classId))
+      })),
+
+      
+
       // 🔒 BİR ÖĞRETMENİN TÜM PROGRAMINI TEK TIKLA KİLİTLE
       pinTeacherSchedule: (teacherId) => set((state) => {
         const { timetable } = state;
@@ -800,6 +824,8 @@ export const useAppStore = create(
 
         return { pinnedSlots: newPins };
       }),
+
+      
 
       // 🔓 BİR ÖĞRETMENİN TÜM KİLİTLERİNİ TEK TIKLA KALDIR
       unpinTeacherSchedule: (teacherId) => set((state) => ({
@@ -839,11 +865,17 @@ export const useAppStore = create(
       },
 
       clearAllPins: () => set({ pinnedSlots: [] }),
+
+      
       setPinnedSlots: (slots) => set({ pinnedSlots: Array.isArray(slots) ? slots : [] }),
+
+      
 
       isGenerating: false,
       generateResult: null,
       setGenerateResult: (result) => set({ generateResult: result }),
+
+      
 
       startGeneration: async () => {
         const { settings, teachers, classrooms, softPrefs, hardPrefs, pinnedSlots } = get();
@@ -920,46 +952,160 @@ export const useAppStore = create(
         }
       },
 
-      // 🏫 HZ. AYŞE KIZ AİHL ÖRNEK VERİLERİ VS. MANUEL MOD EYLEMLERİ
-      loadHzAyseDemoData: () => set({
-        settings: {
-          schoolName: "Hz. Ayşe Kız Anadolu İmam Hatip Lisesi",
-          days: ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"],
-          periodsPerDay: 8,
-          lunchAfter: 4,
-          lunchDuration: 1,
-          principalName: "Cemil Murat Kuru"
-        },
-        teachers: REAL_TEACHERS,
-        classrooms: enrichCoursesWithCodes(REAL_CLASSROOMS),
-        timetable: {},
-        pinnedSlots: [],
-        generateResult: null,
-        demoDataChoice: 'demo'
-      }),
+      // 💾 OKUL VERİLERİ ANLIK YEDEĞİ (Otomatik Snapshot)
+      saveCurrentSchoolSnapshot: () => {
+        const state = get();
+        const currentName = state.settings?.schoolName || 'mevcut_okul';
+        const key = currentName.toLowerCase().includes('ayşe') || currentName.toLowerCase().includes('ayse') 
+          ? 'hz_ayse' 
+          : (currentName.toLowerCase().includes('abdi') ? 'abdi_ipekci' : 'diger');
+        const snapshot = {
+          settings: state.settings,
+          teachers: state.teachers,
+          classrooms: state.classrooms,
+          timetable: state.timetable,
+          pinnedSlots: state.pinnedSlots || [],
+          demoDataChoice: state.demoDataChoice
+        };
+        try {
+          localStorage.setItem(`school_snapshot_${key}`, JSON.stringify(snapshot));
+        } catch (e) {
+          console.warn("Snapshot save failed", e);
+        }
+      },
 
-      clearDataForManualEntry: () => set({
-        settings: {
-          schoolName: "Okul Ders Programı",
-          days: ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"],
-          periodsPerDay: 8,
-          lunchAfter: 4,
-          lunchDuration: 1,
-          principalName: "Okul Müdürü"
-        },
-        teachers: [],
-        classrooms: [],
-        timetable: {},
-        pinnedSlots: [],
-        generateResult: null,
-        demoDataChoice: 'manual'
-      }),
+      // 📥 TEK TIKLA MEVCUT OKUL VERİ TABANINI JSON OLARAK İNDİR
+      downloadSchoolBackup: () => {
+        const state = get();
+        const cleanSchoolName = (state.settings?.schoolName || "okul").toLowerCase().replace(/[^a-z0-9]/g, "_");
+        const today = new Date().toISOString().split('T')[0];
+        const backupData = {
+          settings: state.settings,
+          teachers: state.teachers,
+          classrooms: state.classrooms,
+          timetable: state.timetable,
+          pinnedSlots: state.pinnedSlots || [],
+          softPrefs: state.softPrefs,
+          hardPrefs: state.hardPrefs,
+          exportDate: new Date().toISOString(),
+          version: "2.0.0"
+        };
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", `${cleanSchoolName}_tam_yedek_${today}.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+      },
+
+      // 🏫 HZ. AYŞE KIZ AİHL VERİLERİ (Önceden üzerinde çalışılmış hali korunur)
+      loadHzAyseDemoData: () => {
+        get().saveCurrentSchoolSnapshot();
+        let saved = null;
+        try {
+          const raw = localStorage.getItem('school_snapshot_hz_ayse');
+          if (raw) saved = JSON.parse(raw);
+        } catch (e) {}
+
+        if (saved && saved.teachers?.length > 0) {
+          set({
+            settings: saved.settings,
+            teachers: saved.teachers,
+            classrooms: saved.classrooms,
+            timetable: saved.timetable || {},
+            pinnedSlots: saved.pinnedSlots || [],
+            generateResult: null,
+            demoDataChoice: 'demo'
+          });
+        } else {
+          set({
+            settings: {
+              schoolName: "Hz. Ayşe Kız Anadolu İmam Hatip Lisesi",
+              days: ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"],
+              periodsPerDay: 8,
+              lunchAfter: 4,
+              lunchDuration: 1,
+              principalName: "Cemil Murat Kuru"
+            },
+            teachers: REAL_TEACHERS,
+            classrooms: enrichCoursesWithCodes(REAL_CLASSROOMS),
+            timetable: {},
+            pinnedSlots: [],
+            generateResult: null,
+            demoDataChoice: 'demo'
+          });
+        }
+      },
+
+      // 🏫 ABDİ İPEKÇİ ORTAOKULU GERÇEK VERİ SETİ (PDF'ten 100% Doğrulanmış)
+      loadAbdiIpekciDemoData: (includeSchedule = true) => {
+        get().saveCurrentSchoolSnapshot();
+        let saved = null;
+        try {
+          const raw = localStorage.getItem('school_snapshot_abdi_ipekci');
+          if (raw) saved = JSON.parse(raw);
+        } catch (e) {}
+
+        if (saved && saved.teachers?.length > 0) {
+          set({
+            settings: saved.settings,
+            teachers: saved.teachers,
+            classrooms: saved.classrooms,
+            timetable: includeSchedule ? (saved.timetable || ABDI_TIMETABLE) : {},
+            pinnedSlots: saved.pinnedSlots || [],
+            generateResult: null,
+            demoDataChoice: 'abdi'
+          });
+        } else {
+          set({
+            settings: ABDI_SETTINGS,
+            teachers: ABDI_TEACHERS,
+            classrooms: enrichCoursesWithCodes(ABDI_CLASSROOMS),
+            timetable: includeSchedule ? ABDI_TIMETABLE : {},
+            pinnedSlots: [],
+            generateResult: null,
+            demoDataChoice: 'abdi'
+          });
+        }
+      },
+
+      clearDataForManualEntry: () => {
+        get().saveCurrentSchoolSnapshot();
+        set({
+          settings: {
+            schoolName: "Okul Ders Programı",
+            days: ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"],
+            periodsPerDay: 8,
+            lunchAfter: 4,
+            lunchDuration: 1,
+            principalName: "Okul Müdürü"
+          },
+          teachers: [],
+          classrooms: [],
+          timetable: {},
+          pinnedSlots: [],
+          generateResult: null,
+          demoDataChoice: 'manual'
+        });
+      },
+
+      
 
       setDemoDataChoice: (choice) => set({ demoDataChoice: choice }),
+
+      
       resetDemoPrompt: () => set({ demoDataChoice: null }),
 
+      
+
       updateSettings: (newSettings) => set((state) => ({ settings: { ...state.settings, ...newSettings } })),
-      addTeacher: (teacher) => set((state) => ({ teachers: [...state.teachers, { ...teacher, id: newId('t') }] })),
+      addTeacher: (teacher) => {
+        const id = teacher.id || newId('t');
+        const newTeacherObj = { ...teacher, id };
+        set((state) => ({ teachers: [...state.teachers, newTeacherObj] }));
+        return newTeacherObj;
+      },
       updateTeacher: (id, updatedFields) => set((state) => ({ teachers: state.teachers.map((t) => (t.id === id ? { ...t, ...updatedFields } : t)) })),
       deleteTeacher: (id) => set((state) => ({ teachers: state.teachers.filter((t) => t.id !== id) })),
       addClassroom: (classroom) => set((state) => {
@@ -971,6 +1117,8 @@ export const useAppStore = create(
           classrooms: [...state.classrooms, { ...classroom, id: newId('c'), courses: enrichedCourses }]
         };
       }),
+
+      
       updateClassroom: (id, updatedFields) => set((state) => ({
         classrooms: state.classrooms.map((c) => {
           if (c.id !== id) return c;
@@ -998,6 +1146,8 @@ export const useAppStore = create(
             warnings: liveViolations,
             metrics: {
               ...(state.generateResult.metrics || {}),
+
+      
               ...liveMetrics,
               relaxedRules: liveRelaxed,
               relaxedRulesCount: liveRelaxed.length,
@@ -1044,6 +1194,8 @@ export const useAppStore = create(
             warnings: liveViolations,
             metrics: {
               ...(state.generateResult.metrics || {}),
+
+      
               ...liveMetrics,
               relaxedRules: liveRelaxed,
               relaxedRulesCount: liveRelaxed.length,
@@ -1094,6 +1246,8 @@ export const useAppStore = create(
           }
         };
       }),
+
+      
       resetDykDayCustomTimes: (day) => set((state) => {
         const prev = { ...(state.dykSettings?.dayCustomTimes || {}) };
         delete prev[day];
@@ -1104,6 +1258,8 @@ export const useAppStore = create(
           }
         };
       }),
+
+      
       excludeTeacherFromDyk: (teacherId) => set((state) => {
         const current = state.dykSettings?.excludedTeacherIds || [];
         const nextExcluded = current.includes(teacherId) ? current : [...current, teacherId];
@@ -1115,6 +1271,8 @@ export const useAppStore = create(
           dykAssignments: state.dykAssignments.filter(a => a.teacherId !== teacherId)
         };
       }),
+
+      
       includeTeacherInDyk: (teacherId) => set((state) => {
         const current = state.dykSettings?.excludedTeacherIds || [];
         return {
@@ -1124,6 +1282,8 @@ export const useAppStore = create(
           }
         };
       }),
+
+      
       addDykGroup: (group) => set((state) => ({ dykGroups: [...state.dykGroups, { ...group, id: newId('dg') }] })),
       updateDykGroup: (id, fields) => set((state) => ({ dykGroups: state.dykGroups.map(g => g.id === id ? { ...g, ...fields } : g) })),
       deleteDykGroup: (id) => set((state) => ({
@@ -1146,6 +1306,8 @@ export const useAppStore = create(
         }
       })),
       setDykSchedule: (schedule) => set({ dykSchedule: schedule }),
+
+      
       generateDykSchedule: () => {
         const { dykGroups, dykAssignments, dykTeacherAvailabilities, dykSettings, teachers, timetable, settings } = get();
         const res = solveDykSchedule({
@@ -1170,6 +1332,8 @@ export const useAppStore = create(
         return res;
       },
       clearDykSchedule: () => set({ dykSchedule: null, dykResult: null }),
+
+      
       setDykResult: (newResult) => set((state) => ({ dykResult: { ...state.dykResult, ...newResult } })),
 
       // ==========================================
@@ -1180,7 +1344,7 @@ export const useAppStore = create(
         endDate: "2026-11-13",
         selectedDates: ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13"],
         examSlots: [3, 5],
-        grades: ["9", "10", "11-SAY", "11-EA", "12"],
+        grades: ["9", "10", "11-SAY", "11-EA", "12-SAY", "12-EA"],
         schoolYear: "2026-2027",
         semester: "1",
         examNo: "1"
@@ -1194,8 +1358,10 @@ export const useAppStore = create(
 
       updateExamSettings: (newSettings) => set((state) => ({ examSettings: { ...state.examSettings, ...newSettings } })),
       setExamSubjectsByGrade: (newSubjects) => set({ examSubjectsByGrade: newSubjects }),
+
+      
       setExamPlacements: (newPlacements) => set((state) => {
-        const grades = state.examSettings?.grades || ["9", "10", "11-SAY", "11-EA", "12"];
+        const grades = state.examSettings?.grades || ["9", "10", "11-SAY", "11-EA", "12-SAY", "12-EA"];
         const dates = state.examSettings?.selectedDates || [];
         const updatedSchedule = buildScheduleFromPlacements(newPlacements, grades, dates, state.examSubjectsByGrade);
         return {
@@ -1203,6 +1369,8 @@ export const useAppStore = create(
           examSchedule: updatedSchedule
         };
       }),
+
+      
       toggleExamSubjectMajor: (grade, subjectId) => set((state) => {
         const current = state.examSubjectsByGrade[grade] || [];
         const targetSub = current.find(s => s.id === subjectId);
@@ -1226,6 +1394,8 @@ export const useAppStore = create(
           examSubjectsByGrade: updatedByGrade
         };
       }),
+
+      
       updateExamSubjectMebConfig: (grade, subjectId, config = {}, applyToAllGrades = false) => set((state) => {
         const currentList = state.examSubjectsByGrade?.[grade] || [];
         const targetSub = currentList.find(s => s.id === subjectId);
@@ -1265,6 +1435,8 @@ export const useAppStore = create(
           examSubjectsByGrade: updatedByGrade
         };
       }),
+
+      
       addExamSubject: (grade, subject) => set((state) => {
         const current = state.examSubjectsByGrade[grade] || [];
         const subNorm = (subject.name || '').trim().toLocaleLowerCase('tr-TR');
@@ -1294,6 +1466,8 @@ export const useAppStore = create(
           examSubjectsByGrade: updatedByGrade
         };
       }),
+
+      
       deleteExamSubject: (grade, subjectId) => set((state) => {
         const current = state.examSubjectsByGrade[grade] || [];
         return {
@@ -1303,6 +1477,8 @@ export const useAppStore = create(
           }
         };
       }),
+
+      
       generateExamSchedule: () => {
         const { examSettings, examSubjectsByGrade, teachers, classrooms, timetable, settings } = get();
         const res = solveExamSchedule({
@@ -1359,10 +1535,16 @@ export const useAppStore = create(
         current[date][slot][classroomId] = teacherId;
         return { examSupervisors: current };
       }),
+
+      
       clearExamSchedule: () => set({ examSchedule: null, examPlacements: null, examResult: null, examSupervisors: null, examSupervisorResult: null }),
+
+      
       clearExamSupervisors: () => set({ examSupervisors: null, examSupervisorResult: null })
 
     }),
+
+      
     {
       name: 'hz-ayse-timetable-v1',
       // 🛡️ 5MB localStorage kota patlamasını (QuotaExceededError) önleyen filtre:

@@ -40,6 +40,7 @@ export default function KelebekPlanner() {
   const [students, setStudents] = useState(store.getStudents());
   const [rooms, setRooms] = useState(store.getRooms());
   const [activeGrades, setActiveGrades] = useState(store.getActiveGrades());
+  const [separatePairs, setSeparatePairs] = useState(store.getSeparatePairs());
   const [plan, setPlan] = useState(store.getPlan());
   const [error, setError] = useState(null);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -49,6 +50,7 @@ export default function KelebekPlanner() {
   useEffect(() => { store.setStudents(students); }, [students]);
   useEffect(() => { store.setRooms(rooms); }, [rooms]);
   useEffect(() => { store.setActiveGrades(activeGrades); }, [activeGrades]);
+  useEffect(() => { store.setSeparatePairs(separatePairs); }, [separatePairs]);
 
   // If rooms is empty but appStore classrooms exist, pre-fill them
   useEffect(() => {
@@ -91,7 +93,7 @@ export default function KelebekPlanner() {
   const handleGenerate = () => {
     setError(null);
     try {
-      const newPlan = runAlgorithm(students, rooms, activeGrades);
+      const newPlan = runAlgorithm(students, rooms, activeGrades, separatePairs);
       setPlan(newPlan);
       store.setPlan(newPlan);
       goToStep(5);
@@ -104,7 +106,7 @@ export default function KelebekPlanner() {
   const handleRegenerate = () => {
     setError(null);
     try {
-      const newPlan = runAlgorithm(students, rooms, activeGrades);
+      const newPlan = runAlgorithm(students, rooms, activeGrades, separatePairs);
       setPlan(newPlan);
       store.setPlan(newPlan);
       showToast('Kelebek dağıtım planı yeni oturma düzeniyle güncellendi!');
@@ -119,6 +121,7 @@ export default function KelebekPlanner() {
     localStorage.removeItem('kelebek_rooms');
     localStorage.removeItem('kelebek_plan');
     localStorage.removeItem('kelebek_active_grades');
+    localStorage.removeItem('kelebek_separate_pairs');
 
     setExamInfo({
       okulAdi: settings?.schoolName || 'Antakya Hz. Ayşe Kız AİHL',
@@ -131,6 +134,7 @@ export default function KelebekPlanner() {
     setRooms([]);
     setPlan(null);
     setActiveGrades(['9', '10', '11', '12']);
+    setSeparatePairs([]);
     setStep(1);
     setMaxStep(1);
     setError(null);
@@ -285,6 +289,8 @@ export default function KelebekPlanner() {
             rooms={rooms}
             activeGrades={activeGrades}
             onGradesChange={setActiveGrades}
+            separatePairs={separatePairs}
+            onSeparatePairsChange={setSeparatePairs}
             onGenerate={handleGenerate}
             onBack={() => goToStep(3)}
           />
@@ -331,6 +337,25 @@ export default function KelebekPlanner() {
           </div>
         </div>
       )}
+
+      {/* 📌 ALT BİLGİ (HAZIRLAYAN) */}
+      <footer className="print:hidden border-t border-slate-200/80 bg-white py-3.5 px-6 mt-10 text-center text-xs text-slate-500">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>Kelebek Sistemi — Karma Salon Sınav Dağıtım Modülü</span>
+          <div className="flex items-center gap-2 font-bold text-slate-700">
+            <span>Hazırlayan: Tamer Közleme</span>
+            <span className="text-slate-300">|</span>
+            <a
+              href="https://instagram.com/Tamerkzlm"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-indigo-600 hover:text-indigo-800 hover:underline"
+            >
+              instagram: Tamerkzlm
+            </a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

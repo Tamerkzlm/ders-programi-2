@@ -38,12 +38,9 @@ export default function RoomGrid({ assignment, onSwap }) {
 
   return (
     <div className="overflow-x-auto select-none pb-2">
-      {/* Tahta ve Kapı Çizelgesi */}
-      <div className="flex items-center justify-between max-w-2xl mx-auto mb-4 px-2 gap-3">
-        <div className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 shadow-2xs">
-          🚪 GİRİŞ KAPISI
-        </div>
-        <div className="flex-1 text-center py-1.5 rounded-xl bg-slate-100 border border-slate-300 text-xs font-black text-slate-700 tracking-wider shadow-2xs">
+      {/* Tahta Çizelgesi */}
+      <div className="max-w-2xl mx-auto mb-4 px-2">
+        <div className="w-full text-center py-2 rounded-xl bg-slate-100 border border-slate-300 text-xs font-black text-slate-700 tracking-wider shadow-2xs">
           TAHTA / ÖĞRETMEN MASASI
         </div>
       </div>
