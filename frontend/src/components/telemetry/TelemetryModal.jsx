@@ -16,7 +16,8 @@ import {
   Terminal
 } from 'lucide-react';
 
-const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+const DEFAULT_API_URL = import.meta.env.PROD ? 'https://ders-programi-api.onrender.com' : 'http://127.0.0.1:8000';
+const API_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
 
 export default function TelemetryModal({ solverTimeout = 300, isGenerating = false, stopAtFirstSolution = false }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);

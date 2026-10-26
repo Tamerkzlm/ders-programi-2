@@ -280,7 +280,8 @@ const createNativeSupabaseClient = () => {
 export const supabase = isSupabaseConfigured ? createNativeSupabaseClient() : null;
 
 // 🛡️ Render Cold-Start Önleyici Arka Plan Uyandırıcı (Pre-Warm)
-const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+const DEFAULT_API_URL = import.meta.env.PROD ? 'https://ders-programi-api.onrender.com' : 'http://127.0.0.1:8000';
+const API_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
 let lastWarmPingAt = 0;
 
 export const preWarmSolverBackend = async () => {

@@ -4,8 +4,9 @@ import { persist } from 'zustand/middleware';
 import { solveDykSchedule } from '../utils/dykEngine';
 import { solveExamSchedule, solveSupervisors, DEFAULT_EXAM_SUBJECTS, buildScheduleFromPlacements } from '../utils/examEngine';
 
-// Backend adresi: .env dosyasındaki VITE_API_URL (boşsa yerel geliştirme sunucusu)
-const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+// Backend adresi: .env dosyasındaki VITE_API_URL (üretimde otomatik Render API, yerelde 127.0.0.1:8000)
+const DEFAULT_API_URL = import.meta.env.PROD ? 'https://ders-programi-api.onrender.com' : 'http://127.0.0.1:8000';
+const API_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
 
 // Silme sonrası bile çakışmayan benzersiz kimlik
 const newId = (prefix) => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
