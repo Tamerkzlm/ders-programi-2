@@ -2,8 +2,11 @@
 // 🛡️ Sıfır Harici Bağımlılıklı (Zero-Dependency) Native Fetch Supabase Auth & PostgREST İstemcisi
 // Hem yerel çevrimdışı modda hem de Netlify/Vercel bulut dağıtımında ek paket kurulumu gerektirmeden çalışır.
 
-const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
-const rawAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+const DEFAULT_SUPABASE_URL = 'https://xjwgqqjlblvliljurozc.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_97Kb-DZXLI5GCmdK7o3Eww_ZCG9Jc3d';
+
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL).trim().replace(/\/+$/, '');
+const rawAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY).trim();
 const AUTH_STORAGE_KEY = 'okul_planlama_supabase_auth_v1';
 
 const isValidSupabaseUrl = (url) => {
@@ -93,13 +96,18 @@ const getValidAccessToken = async () => {
 
 const buildHeaders = async (extraHeaders = {}) => {
   const token = await getValidAccessToken();
-  return {
+  const headers = {
     apikey: rawAnonKey,
-    Authorization: `Bearer ${token || rawAnonKey}`,
     'Content-Type': 'application/json',
     'x-application-name': 'okul-planlama-platformu',
     ...extraHeaders,
   };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  } else if (rawAnonKey.startsWith('eyJ')) {
+    headers.Authorization = `Bearer ${rawAnonKey}`;
+  }
+  return headers;
 };
 
 const createNativeSupabaseClient = () => {

@@ -5,6 +5,8 @@
 
 [build.environment]
   VITE_API_URL = "https://ders-programi-api.onrender.com"
+  VITE_SUPABASE_URL = "https://xjwgqqjlblvliljurozc.supabase.co"
+  VITE_SUPABASE_ANON_KEY = "sb_publishable_97Kb-DZXLI5GCmdK7o3Eww_ZCG9Jc3d"
 
 [[redirects]]
   from = "/*"
