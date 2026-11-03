@@ -15,6 +15,7 @@ import {
   Layers
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
+import { APP_VERSION_LABEL } from '../config/version';
 
 export default function Portal() {
   const navigate = useNavigate();
@@ -111,7 +112,7 @@ export default function Portal() {
                   {settings?.schoolName || 'Hz. Ayşe Kız Anadolu İmam Hatip Lisesi'}
                 </h1>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                  v2.0 Pro
+                  {APP_VERSION_LABEL} Pro
                 </span>
               </div>
               <p className="text-xs text-slate-400">

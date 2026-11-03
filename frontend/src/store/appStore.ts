@@ -4,6 +4,7 @@ import { persist } from 'zustand/middleware';
 import { solveDykSchedule } from '../utils/dykEngine';
 import { solveExamSchedule, solveSupervisors, DEFAULT_EXAM_SUBJECTS, buildScheduleFromPlacements } from '../utils/examEngine';
 import { generateCourseCode } from '../utils/courseCodeHelper';
+import { APP_VERSION } from '../config/version';
 import type {
   DemoDataChoice,
   Settings,
@@ -1123,7 +1124,7 @@ export const useAppStore = create<AppState>()(
           softPrefs: state.softPrefs,
           hardPrefs: state.hardPrefs,
           exportDate: new Date().toISOString(),
-          version: "2.0.0"
+          version: APP_VERSION
         };
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
         const downloadAnchor = document.createElement('a');

@@ -1,0 +1,15 @@
+#!/bin/sh
+# Otomatik Sürüm Artırıcı Git Hook (2.41 -> 2.42 ... veya MAJOR=1 ile 3.0)
+
+# Eğer version.json bu commit içinde zaten manuel olarak değiştirildiyse (örn: version:major çalıştırıldıysa) tekrar artırma
+if git diff --cached --name-only | grep -q "^frontend/version.json$"; then
+  exit 0
+fi
+
+if [ "$MAJOR" = "1" ]; then
+  node frontend/scripts/bump-version.mjs --major
+else
+  node frontend/scripts/bump-version.mjs
+fi
+
+git add frontend/version.json

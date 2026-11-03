@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import CloudSyncBar from '../common/CloudSyncBar';
+import { APP_VERSION_LABEL } from '../../config/version';
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -171,7 +172,7 @@ export default function Sidebar() {
           >
             instagram: Tamerkzlm
           </a>
-          <span className="text-slate-400 font-mono">Çevrimiçi</span>
+          <span className="text-slate-400 font-mono">{APP_VERSION_LABEL} • Çevrimiçi</span>
         </div>
       </div>
 

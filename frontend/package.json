@@ -1,14 +1,16 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.41.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "version:bump": "node scripts/bump-version.mjs",
+    "version:major": "node scripts/bump-version.mjs --major"
   },
   "dependencies": {
     "lucide-react": "^1.18.0",

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { Printer, FileText, Users, GraduationCap, AlertCircle, Download, Upload, CheckCircle } from 'lucide-react';
 import { calculateTeacherDutyDay } from '../utils/dutyDayCalculator';
+import { APP_VERSION } from '../config/version';
 
 export default function Export() {
   // Tüm store verilerini ve tek tek set aksiyonlarını çekiyoruz
@@ -39,7 +40,7 @@ export default function Export() {
         examSchedule: storeState.examSchedule,
         examSupervisors: storeState.examSupervisors,
         exportDate: new Date().toISOString(),
-        version: "2.0.0"
+        version: APP_VERSION
       };
 
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));

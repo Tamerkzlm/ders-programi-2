@@ -12,6 +12,7 @@ import {
 import { useAppStore } from '../store/appStore';
 import { store as kelebekStore } from '../utils/kelebek/store';
 import CloudSyncBar from '../components/common/CloudSyncBar';
+import { APP_VERSION_LABEL } from '../config/version';
 
 /**
  * 1. Haftalık Ders Programı oluşturuldu mu? (Boş objeleri ve boş gün dizilerini eler)
@@ -229,7 +230,7 @@ export default function ModuleHub() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200/60">
-                  Resmi Maarif v2.4
+                  Resmi Maarif {APP_VERSION_LABEL}
                 </span>
                 <span className="text-xs font-semibold text-slate-400">|</span>
                 <span className="text-xs font-semibold text-slate-500">Akademik Planlama Portalı</span>
@@ -338,7 +339,7 @@ export default function ModuleHub() {
       {/* 📌 ALT BİLGİ & SÜRÜM */}
       <footer className="border-t border-slate-200/80 bg-white py-4 px-6 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>© 2026 {settings?.schoolName || 'Antakya Hz. Ayşe Kız AİHL'} - Kurumsal Yönetim Paketi</span>
+          <span>© 2026 {settings?.schoolName || 'Antakya Hz. Ayşe Kız AİHL'} - Kurumsal Yönetim Paketi ({APP_VERSION_LABEL})</span>
           <div className="flex items-center gap-2 font-bold text-slate-700">
             <span>Hazırlayan: Tamer Közleme</span>
             <span className="text-slate-300">|</span>
