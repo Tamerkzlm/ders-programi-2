@@ -1,13 +1,13 @@
 // frontend/src/pages/Subjects.jsx
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppStore } from '../store/appStore';
-import { BookOpen, Plus, Trash2, Search, Sparkles, Hash, Layers } from 'lucide-react';
+import { BookOpen, Plus, Trash2, Search, Sparkles, Hash } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import DemoDataPromptModal from '../components/common/DemoDataPromptModal';
 import { generateCourseCode, COMMON_SUBJECT_TEMPLATES } from '../utils/courseCodeHelper';
 
 export default function Subjects() {
-  const { classrooms, updateClassroom, addClassroom } = useAppStore();
+  const { classrooms, updateClassroom } = useAppStore();
   const navigate = useNavigate();
   
   const [newSubjectName, setNewSubjectName] = useState('');

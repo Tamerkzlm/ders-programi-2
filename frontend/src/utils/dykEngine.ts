@@ -8,7 +8,6 @@ import type {
   DykAssignment,
   DykTeacherAvailabilities,
   DykSchedule,
-  DykCell,
   TeacherSchoolAnalysis,
 } from '../types';
 /**
@@ -370,7 +369,6 @@ export const isTeacherFreeInDyk = ({
   blockId,
   ignoreGroupId = null as string | null,
   dykTeacherAvailabilities = {} as DykTeacherAvailabilities,
-  activeDays = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"]
 }: {
   dykSchedule?: DykSchedule;
   teacherId?: string;
@@ -607,7 +605,6 @@ export const placeUnassignedDykActivity = ({
   targetDay,
   targetBlockId,
   dykTeacherAvailabilities = {} as DykTeacherAvailabilities,
-  activeDays = [] as string[],
   allowDayOverride = true
 }: any) => {
   if (!activity || !activity.groupId || !targetDay || !targetBlockId) {

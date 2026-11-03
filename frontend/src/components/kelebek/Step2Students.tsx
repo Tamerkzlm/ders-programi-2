@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
-  Upload, AlertCircle, ChevronRight, ChevronLeft, Search, Users,
+  Upload, AlertCircle, ChevronRight, ChevronLeft, Search,
   FileSpreadsheet, Loader2, UserPlus, X, Check, Download, Trash2, Edit2
 } from 'lucide-react';
 import { parseEOkulXLS, downloadStudentTemplate, gradeFromSinif } from '../../utils/kelebek/parser';

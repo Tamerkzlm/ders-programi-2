@@ -1,13 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ChevronLeft, Printer, AlertTriangle, CheckCircle2, Building2,
-  RotateCcw, Download, Sparkles, DoorOpen, FileSpreadsheet,
-  ShieldCheck, UserX
+  RotateCcw, DoorOpen, ShieldCheck
 } from 'lucide-react';
 import RoomGrid from './RoomGrid';
 import { getSeatLabel, findViolations } from '../../../utils/kelebek/algorithm';
 import { buildRoomListHTML, buildClassListHTML, buildDoorListHTML } from './printBuilder';
-import { exportPlanToExcel } from '../../../utils/kelebek/parser';
 
 const GRADE_COLORS = {
   '9':  'bg-blue-100 border-blue-300 text-blue-900',

@@ -1,15 +1,13 @@
-// frontend/src/pages/ExamPlanner.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+// frontend/src/pages/ExamPlanner.tsx
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, 
   CalendarDays, 
   Clock, 
-  ShieldCheck, 
   Star, 
   Sparkles, 
   Printer, 
-  CheckCircle2, 
   AlertCircle, 
   Plus, 
   Trash2, 
@@ -17,18 +15,12 @@ import {
   BookOpen, 
   LayoutGrid, 
   Check, 
-  Info,
-  Calendar,
-  Download,
   RefreshCw,
-  Layers,
   ChevronRight,
-  FileSpreadsheet,
   RotateCcw,
   X,
   Users,
   GraduationCap,
-  Filter,
   Move
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
@@ -106,40 +98,6 @@ const SUBJECT_FULL_NAMES = {
   'AUB1': 'Astronomi ve Uzay Bilimleri'
 };
 
-// Kademeye ait okuldaki gerçek sınıfları/şubeleri bulur
-const getGradeSections = (grade, classrooms = []) => {
-  return classrooms.filter(c => {
-    const cName = (c.name || '').trim();
-    if (grade === '11-SAY') {
-      const match = cName.startsWith('11');
-      if (!match) return false;
-      const coursesUpper = (c.courses || []).map(co => (co.subject || '').toUpperCase());
-      return coursesUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY')) || cName.toUpperCase().includes('SAY');
-    }
-    if (grade === '11-EA') {
-      const match = cName.startsWith('11');
-      if (!match) return false;
-      const coursesUpper = (c.courses || []).map(co => (co.subject || '').toUpperCase());
-      const isSay = coursesUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY')) || cName.toUpperCase().includes('SAY');
-      return !isSay;
-    }
-    if (grade === '12-SAY') {
-      const match = cName.startsWith('12');
-      if (!match) return false;
-      const coursesUpper = (c.courses || []).map(co => (co.subject || '').toUpperCase());
-      return coursesUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY')) || cName.toUpperCase().includes('SAY');
-    }
-    if (grade === '12-EA') {
-      const match = cName.startsWith('12');
-      if (!match) return false;
-      const coursesUpper = (c.courses || []).map(co => (co.subject || '').toUpperCase());
-      const isSay = coursesUpper.some(s => s.includes('FİZ') || s.includes('FIZ') || s.includes('KİM') || s.includes('KMY') || s.includes('BİY')) || cName.toUpperCase().includes('SAY');
-      return !isSay;
-    }
-    return cName.startsWith(grade) || cName.includes(`${grade}-`) || cName.includes(`${grade}/`);
-  });
-};
-
 export default function ExamPlanner() {
   const navigate = useNavigate();
   const {
@@ -166,7 +124,6 @@ export default function ExamPlanner() {
   // 3 Dikey Menü Sekmesi: 'settings' | 'subjects' | 'distribution'
   const [activeMenu, setActiveMenu] = useState((examSchedule || (examPlacements && examPlacements.length > 0)) ? 'distribution' : 'settings');
   const [selectedGrade, setSelectedGrade] = useState('9');
-  const [viewMode, setViewMode] = useState('matrix'); // 'matrix' | 'single'
   const [toastMessage, setToastMessage] = useState('');
 
   // 1. Menü: Ekstra gün ekleme ve yeni kademe ekleme formları
@@ -175,11 +132,9 @@ export default function ExamPlanner() {
   const [showAddGradeInput, setShowAddGradeInput] = useState(false);
 
   // 2. Menü: Yeni ders ekleme formu
-  const [newSubGrade, setNewSubGrade] = useState('9');
   const [newSubName, setNewSubName] = useState('');
   const [newSubCode, setNewSubCode] = useState('');
   const [newSubIsMajor, setNewSubIsMajor] = useState(false);
-  const [newSubSelectedSections, setNewSubSelectedSections] = useState([]);
 
   // Kademeler listesi (Ön tanımlı MEB kademeleri: 12. sınıflar SAY ve EA ayrımıyla)
   const ALL_POSSIBLE_GRADES = ["9", "10", "11-SAY", "11-EA", "12-SAY", "12-EA"];
@@ -431,10 +386,6 @@ export default function ExamPlanner() {
     if (g === '12-SAY') return '12. Sınıf (SAY)';
     if (g === '12-EA') return '12. Sınıf (EA)';
     if (!isNaN(g)) return `${g}. Sınıf`;
-    return g;
-  };
-
-  const getGradeShort = (g) => {
     return g;
   };
 
@@ -719,7 +670,6 @@ export default function ExamPlanner() {
   // Ders adı yazılırken diğer sınıflarda kayıtlı bir dersle eşleşirse Ana Ders durumunu otomatik senkronize et
   const handleSubjectNameInputChange = (val) => {
     setNewSubName(val);
-    setNewSubGrade(selectedGrade);
     const norm = normalizeSubName(val);
     if (norm && allSchoolSubjectsMap.has(norm)) {
       setNewSubIsMajor(!!allSchoolSubjectsMap.get(norm).isMajor);
@@ -756,7 +706,6 @@ export default function ExamPlanner() {
     setNewSubName('');
     setNewSubCode('');
     setNewSubIsMajor(false);
-    setNewSubSelectedSections([]);
     showToast(`"${existingGlobal?.name || trimmedName}" dersi ${getGradeTitle(targetGrade)} kademesine eklendi.`);
   };
 
@@ -773,16 +722,6 @@ export default function ExamPlanner() {
 
   // İlk seans (günün ilk sınavı)
   const firstSlot = [...examSlots].sort((a, b) => a - b)[0] || 2;
-
-  // Seçili kademeye ait okuldaki şubeler
-  const activeGradeSections = useMemo(() => {
-    return getGradeSections(selectedGrade, classrooms);
-  }, [selectedGrade, classrooms]);
-
-  // A4 tek sayfaya sığdırma için dinamik yazı boyutu ve hücre dolgusu (gün ve satır sayısına göre)
-  const printFontSizePx = workingDays.length > 11 ? 6.5 : workingDays.length > 8 ? 7.5 : 8.5;
-  const totalPrintRows = examSlots.length * grades.length;
-  const printCellPadY = totalPrintRows > 12 ? 2 : 3.5;
 
   return (
     <div className="min-h-screen print:min-h-0 bg-slate-50/70 print:bg-white font-sans text-slate-800 flex flex-col pb-16 print:pb-0">
@@ -1295,7 +1234,6 @@ export default function ExamPlanner() {
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
                       {allCandidateGrades.map(g => {
                         const isSelected = grades.includes(g);
-                        const isCustom = !ALL_POSSIBLE_GRADES.includes(g);
 
                         return (
                           <div

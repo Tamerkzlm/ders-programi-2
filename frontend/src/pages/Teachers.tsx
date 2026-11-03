@@ -1,5 +1,5 @@
 // frontend/src/pages/Teachers.jsx
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useNavigate } from 'react-router-dom'; 
 import { 
@@ -12,11 +12,9 @@ import {
   BookOpen, 
   Hash, 
   Check, 
-  Sparkles, 
   Search, 
   Layers, 
   ShieldAlert, 
-  Star, 
   Pin, 
   Landmark,
   AlertTriangle,

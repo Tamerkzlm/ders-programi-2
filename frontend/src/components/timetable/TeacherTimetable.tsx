@@ -1,18 +1,9 @@
 // frontend/src/components/timetable/TeacherTimetable.jsx
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Users, 
-  Clock, 
   Lock, 
-  Unlock, 
-  Coffee, 
-  ShieldCheck, 
-  Printer, 
   Search, 
-  Sparkles, 
-  ChevronDown, 
-  CalendarDays, 
-  CheckCircle2, 
   X,
   ArrowRightLeft
 } from 'lucide-react';
@@ -51,11 +42,9 @@ export default function TeacherTimetable({
   // ⚡ SEÇİLEN DERSİN DEĞİŞEBİLECEĞİ DERS SEÇENEKLERİ
   const [selectedSlotForSwap, setSelectedSlotForSwap] = useState(null);
   const [swapMap, setSwapMap] = useState(new Map());
-  const [swapOpportunitiesList, setSwapOpportunitiesList] = useState([]);
 
   const calculateOpportunities = (source) => {
     if (!source || source.fromPool) {
-      setSwapOpportunitiesList([]);
       setSwapMap(new Map());
       return;
     }
@@ -70,7 +59,6 @@ export default function TeacherTimetable({
       settings: { days: daysArray, periodsPerDay: periodsArray.length }
     });
 
-    setSwapOpportunitiesList(opps);
     const map = new Map();
     opps.forEach(o => map.set(`${o.targetDay}-${o.targetPeriod}`, o));
     setSwapMap(map);
@@ -90,7 +78,6 @@ export default function TeacherTimetable({
   const handleSelectSlot = (classId, day, period, item) => {
     if (selectedSlotForSwap && selectedSlotForSwap.classId === classId && selectedSlotForSwap.day === day && Number(selectedSlotForSwap.period) === Number(period)) {
       setSelectedSlotForSwap(null);
-      setSwapOpportunitiesList([]);
       setSwapMap(new Map());
       setDraggedSource(null);
       return;
@@ -121,7 +108,6 @@ export default function TeacherTimetable({
       }
     );
     setSelectedSlotForSwap(null);
-    setSwapOpportunitiesList([]);
     setSwapMap(new Map());
     setDraggedSource(null);
   };

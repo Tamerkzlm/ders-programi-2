@@ -1,22 +1,18 @@
 // frontend/src/components/common/CapacityHeatmap.jsx
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { 
   Activity, 
   AlertTriangle, 
   CheckCircle2, 
-  HelpCircle, 
   Info, 
-  Users, 
   Waves, 
-  ShieldAlert, 
-  ChevronRight 
+  ShieldAlert 
 } from 'lucide-react';
 
 export default function CapacityHeatmap({ 
   teachers = [], 
   classrooms = [], 
   settings = {} as any, 
-  compact = false,
   onDayClick = null 
 }: any) {
   const days = settings?.days || ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"];

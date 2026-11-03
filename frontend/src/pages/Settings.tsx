@@ -19,7 +19,6 @@ export default function Settings() {
   const { 
     settings, 
     updateSettings, 
-    demoDataChoice, 
     loadHzAyseDemoData, 
     loadAbdiIpekciDemoData,
     clearDataForManualEntry, 

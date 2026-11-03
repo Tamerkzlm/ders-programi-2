@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ChevronRight, ChevronLeft, Play, AlertTriangle, CheckCircle2, UserX, Plus, Trash2, Search } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronLeft, Play, AlertTriangle, CheckCircle2, UserX, Plus, Trash2, Search } from 'lucide-react';
 
 const GRADE_COLORS: Record<string, string> = {
   '9': 'bg-blue-50 border-blue-300 text-blue-900',

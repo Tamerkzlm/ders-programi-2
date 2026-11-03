@@ -137,7 +137,6 @@ function layeredDistribution(activeStudents, rooms, separatePairs = []) {
           const partnerGrade = partnerStudent.grade;
 
           // partnerStudent'ı başka bir salondaki aynı sınıf düzeyinden (grade) uygun bir öğrenciyle takas et
-          let swapped = false;
           for (let targetRi = 0; targetRi < rooms.length; targetRi++) {
             if (targetRi === ri) continue;
 
@@ -168,7 +167,6 @@ function layeredDistribution(activeStudents, rooms, separatePairs = []) {
               const candidate = roomStudents[targetRi][candidateIdx];
               roomStudents[targetRi][candidateIdx] = partnerStudent;
               roomStudents[ri][partnerIndexInSameRoom] = candidate;
-              swapped = true;
               break;
             }
           }

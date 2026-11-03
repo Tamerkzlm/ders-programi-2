@@ -1,5 +1,3 @@
-import React from 'react';
-
 const GRADE_COLORS = {
   '9':  { bg: 'bg-blue-50',    border: 'border-blue-300',    text: 'text-blue-900',    badgeBg: 'bg-blue-100 text-blue-900 border-blue-200' },
   '10': { bg: 'bg-emerald-50', border: 'border-emerald-300', text: 'text-emerald-900', badgeBg: 'bg-emerald-100 text-emerald-900 border-emerald-200' },

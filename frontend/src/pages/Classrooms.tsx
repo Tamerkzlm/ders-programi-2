@@ -16,11 +16,8 @@ import {
   Clock, 
   Search, 
   ArrowRight,
-  Sparkles,
-  Layers,
   Hash
 } from 'lucide-react';
-import { getCourseColorClass } from '../utils/courseColors';
 import DemoDataPromptModal from '../components/common/DemoDataPromptModal';
 import { generateCourseCode } from '../utils/courseCodeHelper';
 

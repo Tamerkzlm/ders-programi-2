@@ -4,7 +4,6 @@ import type {
   Classroom,
   Timetable,
   ExamDayInfo,
-  ExamSubject,
   ExamSubjectsByGrade,
   ExamPlacement,
   ExamSchedule,

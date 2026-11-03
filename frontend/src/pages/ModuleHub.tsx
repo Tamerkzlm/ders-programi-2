@@ -1,5 +1,5 @@
 // frontend/src/pages/ModuleHub.jsx
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   CalendarDays, 

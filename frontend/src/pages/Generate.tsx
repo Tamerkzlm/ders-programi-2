@@ -17,7 +17,6 @@ import {
   CalendarDays,
   CheckCircle2,
   Waves,
-  Sun,
   X
 } from 'lucide-react';
 import TelemetryModal from '../components/telemetry/TelemetryModal';

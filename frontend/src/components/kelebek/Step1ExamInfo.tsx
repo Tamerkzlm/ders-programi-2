@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { School, BookOpen, Calendar, Clock, FileText, ChevronRight } from 'lucide-react';
 
 const EXAM_TYPES = [

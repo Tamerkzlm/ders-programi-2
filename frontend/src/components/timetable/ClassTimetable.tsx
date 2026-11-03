@@ -1,20 +1,15 @@
 // frontend/src/components/timetable/ClassTimetable.jsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { 
   GraduationCap, 
   Lock, 
-  Unlock, 
   Zap, 
   X, 
   Coffee, 
   AlertTriangle, 
-  Pin,
-  Sparkles,
   Layers,
   ArrowRightLeft,
-  CheckCircle2,
-  Info,
-  CalendarDays
+  CheckCircle2
 } from 'lucide-react';
 import { getCourseColorClass } from '../../utils/courseColors';
 import { findSmartSwapOpportunities, evaluateSwapOrMove } from '../../utils/smartSwapEngine';
@@ -29,8 +24,6 @@ export default function ClassTimetable({
   togglePinSlot,
   handleCellMoveOrSwap,
   handleDeleteSlot,
-  handleOpenSmartSwap,
-  getUniqueSubjectStyle = (_subject?: string) => 'bg-indigo-600 text-white',
   checkCellConflict = (_classId?: string, _day?: string, _period?: number, _teacherId?: string) => ({ hasTeacherConflict: false, isTeacherUnavailable: false })
 }: any) {
   const [selectedClassId, setSelectedClassId] = useState(classrooms[0]?.id || '');
@@ -40,7 +33,6 @@ export default function ClassTimetable({
   const [draggedSource, setDraggedSource] = useState(null);
   const [selectedSlotForSwap, setSelectedSlotForSwap] = useState(null);
   const [swapMap, setSwapMap] = useState(new Map());
-  const [swapOpportunitiesList, setSwapOpportunitiesList] = useState([]);
   const [dragHoverTarget, setDragHoverTarget] = useState(null);
 
   const isSlotPinned = (classId, day, period) => {
@@ -52,7 +44,6 @@ export default function ClassTimetable({
   // Takas hesaplayıcı yardımcı
   const calculateOpportunities = (source) => {
     if (!source || source.fromPool) {
-      setSwapOpportunitiesList([]);
       setSwapMap(new Map());
       return;
     }
@@ -67,7 +58,6 @@ export default function ClassTimetable({
       settings: { days: daysArray, periodsPerDay: periodsArray.length }
     });
 
-    setSwapOpportunitiesList(opps);
     const map = new Map();
     opps.forEach(o => map.set(`${o.targetDay}-${o.targetPeriod}`, o));
     setSwapMap(map);
@@ -91,7 +81,6 @@ export default function ClassTimetable({
     // Aynı hücreye tekrar tıklandıysa seçimi kapat
     if (selectedSlotForSwap && selectedSlotForSwap.day === day && Number(selectedSlotForSwap.period) === Number(period)) {
       setSelectedSlotForSwap(null);
-      setSwapOpportunitiesList([]);
       setSwapMap(new Map());
       setDraggedSource(null);
       return;
@@ -122,7 +111,6 @@ export default function ClassTimetable({
       }
     );
     setSelectedSlotForSwap(null);
-    setSwapOpportunitiesList([]);
     setSwapMap(new Map());
     setDraggedSource(null);
   };
@@ -194,7 +182,6 @@ export default function ClassTimetable({
               onChange={(e) => {
                 setSelectedClassId(e.target.value);
                 setSelectedSlotForSwap(null);
-                setSwapOpportunitiesList([]);
                 setSwapMap(new Map());
               }}
               className="bg-slate-50 border border-slate-200 text-slate-800 text-sm font-extrabold rounded-xl px-3 py-1.5 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
@@ -352,7 +339,6 @@ export default function ClassTimetable({
                           const source = JSON.parse(raw);
                           handleCellMoveOrSwap(selectedClass.id, source, { day, period });
                           setSelectedSlotForSwap(null);
-                          setSwapOpportunitiesList([]);
                           setSwapMap(new Map());
                         } catch { /* yoksay */ }
                       }}

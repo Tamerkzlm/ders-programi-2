@@ -1,7 +1,7 @@
 // frontend/src/types/cloud.ts
 // ☁️ BULUT SENKRONİZASYONU VE SUPABASE VERİ TİPLERİ
 
-import type { Settings, Teacher, Classroom, Timetable } from './models';
+import type { Settings, Teacher, Timetable } from './models';
 import type { DykSettings, DykGroup, DykSchedule } from './dyk';
 import type { ExamSettings, ExamSchedule, ExamSupervisorsMap } from './exam';
 

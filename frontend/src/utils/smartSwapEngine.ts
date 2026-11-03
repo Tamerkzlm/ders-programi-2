@@ -1,5 +1,5 @@
 // frontend/src/utils/smartSwapEngine.ts
-import type { Teacher, Classroom, Timetable, Settings } from '../types';
+import type { Teacher, Timetable, Settings } from '../types';
 /**
  * ⚡ SMART SWAP (AKILLI TAKAS VE YER DEĞİŞTİRME) ANALİZ MOTORU
  * 
@@ -43,7 +43,6 @@ export const findSmartSwapOpportunities = ({
   sourcePeriod,
   timetable = {} as Timetable,
   teachers = [] as Teacher[],
-  classrooms = [] as Classroom[],
   settings = {} as Partial<Settings>
 }: any) => {
   if (!classId || !sourceDay || !sourcePeriod || !timetable[classId]) {
@@ -90,24 +89,6 @@ export const findSmartSwapOpportunities = ({
     }
 
     return true;
-  };
-
-  // Yardımcı: Bir öğretmenin gün içi boşluk sayısını hesapla
-  const calculateTeacherDayGapsLocal = (teacherId, day, customTimetable) => {
-    const busyPeriods = [];
-    Object.keys(customTimetable || {}).forEach(cId => {
-      (customTimetable[cId]?.[day] || []).forEach(s => {
-        if (s.teacherId === teacherId) {
-          const p = Number(s.period);
-          if (!busyPeriods.includes(p)) busyPeriods.push(p);
-        }
-      });
-    });
-
-    if (busyPeriods.length <= 1) return 0;
-    busyPeriods.sort((a, b) => a - b);
-    const span = busyPeriods[busyPeriods.length - 1] - busyPeriods[0] + 1;
-    return Math.max(0, span - busyPeriods.length);
   };
 
   const currentTotalGaps = calculateTotalSchoolGaps(timetable, teachers, days);
@@ -289,7 +270,6 @@ export const evaluateSwapOrMove = ({
   target,
   timetable = {} as Timetable,
   teachers = [] as Teacher[],
-  classrooms = [] as Classroom[],
   settings = {} as Partial<Settings>
 }: any) => {
   if (!source || !target || !source.teacherId) {
@@ -481,119 +461,3 @@ export const evaluateSwapOrMove = ({
     message: `Boş hücreye taşınabilir. Toplam pencere sayısı: ${currentTotalGaps} ➔ ${newTotalSchoolGaps} (${netGapChange < 0 ? `${Math.abs(netGapChange)} saat azalır 🌟` : netGapChange > 0 ? `${netGapChange} saat artar ⚠️` : 'değişmez'}).`
   };
 };
-
-/**
- * İki öğretmenin derslerini çakışma ve kapalı saat denetimleri yaparak takas eder.
- * JSON serialization yerine saf immutable structural sharing kullanır.
- *
- * @param {Object} params - { timetable, teachers, source, target }
- * @returns {{ success: boolean, reason?: string, newTimetable?: Object }}
- */
-export const executeTeacherSwap = ({
-  timetable = {} as Timetable,
-  teachers = [] as Teacher[],
-  source,
-  target
-}: any) => {
-  if (!source || !target) {
-    return { success: false, reason: 'Kaynak veya hedef hücre belirtilmedi.' };
-  }
-
-  const sClass = source.classId;
-  const tClass = target.classId || sClass;
-  const sDay = source.day;
-  const tDay = target.day;
-  const sPeriod = Number(source.period);
-  const tPeriod = Number(target.period);
-
-  // 1. Aynı hücre kontrolü
-  if (sClass === tClass && sDay === tDay && sPeriod === tPeriod) {
-    return { success: false, reason: 'Kaynak ve hedef aynı hücre olamaz.' };
-  }
-
-  const srcSlot = (timetable[sClass]?.[sDay] || []).find(s => Number(s.period) === sPeriod);
-  const tgtSlot = (timetable[tClass]?.[tDay] || []).find(s => Number(s.period) === tPeriod);
-
-  if (!srcSlot) {
-    return { success: false, reason: 'Kaynak hücrede taşınacak ders bulunamadı.' };
-  }
-
-  const srcTeacherId = srcSlot.teacherId || source.teacherId;
-  const tgtTeacherId = tgtSlot ? (tgtSlot.teacherId || target.teacherId) : null;
-
-  if (tgtSlot && srcTeacherId === tgtTeacherId) {
-    return { success: false, reason: 'Aynı öğretmenin iki dersi karşılıklı takas edilemez.' };
-  }
-
-  const srcTeacher = teachers.find(t => t.id === srcTeacherId);
-  const tgtTeacher = tgtTeacherId ? teachers.find(t => t.id === tgtTeacherId) : null;
-
-  // Takas esnasında boşalacak hücrelerin çakışma kontrolünden muaf tutulması
-  const isVacated = (cId, d, p) =>
-    (cId === sClass && d === sDay && Number(p) === sPeriod) ||
-    (cId === tClass && d === tDay && Number(p) === tPeriod);
-
-  // Müsaitlik ve çakışma denetleyici
-  const checkConflict = (teacher, day, period) => {
-    if (!teacher) return null;
-    const p = Number(period);
-
-    // Kural A: Kapalı / Kısıtlı saat kontrolü
-    if (teacher.unavailable?.[day]?.some(up => Number(up) === p)) {
-      return `${teacher.name} öğretmeni ${day} ${p}. saatte müsait değil (kapalı saat).`;
-    }
-
-    // Kural B: Başka sınıfta derste olma durumu
-    for (const [cId, days] of Object.entries(timetable)) {
-      const busy = (days?.[day] || []).find(s =>
-        Number(s.period) === p &&
-        s.teacherId === teacher.id &&
-        !isVacated(cId, day, s.period)
-      );
-      if (busy) {
-        return `${teacher.name} öğretmeni ${day} ${p}. saatte başka bir sınıfta derste.`;
-      }
-    }
-    return null;
-  };
-
-  // Kaynak öğretmen hedef saate gidebilir mi?
-  const srcConflict = checkConflict(srcTeacher, tDay, tPeriod);
-  if (srcConflict) return { success: false, reason: srcConflict };
-
-  // Hedef öğretmen (varsa) kaynak saate gidebilir mi?
-  if (tgtTeacher) {
-    const tgtConflict = checkConflict(tgtTeacher, sDay, sPeriod);
-    if (tgtConflict) return { success: false, reason: tgtConflict };
-  }
-
-  // 2. Saf Immutable Güncelleme (Structural Sharing)
-  const newSrcSlot = tgtSlot ? { ...tgtSlot, period: sPeriod } : null;
-  const newTgtSlot = { ...srcSlot, period: tPeriod };
-
-  const updateDay = (daySlots = [], period, slotToAdd) => {
-    const filtered = daySlots.filter(s => Number(s.period) !== Number(period));
-    return slotToAdd ? [...filtered, slotToAdd].sort((a, b) => Number(a.period) - Number(b.period)) : filtered;
-  };
-
-  let newTimetable = {
-    ...timetable,
-    [sClass]: {
-      ...timetable[sClass],
-      [sDay]: updateDay(timetable[sClass]?.[sDay], sPeriod, newSrcSlot)
-    }
-  };
-
-  newTimetable = {
-    ...newTimetable,
-    [tClass]: {
-      ...newTimetable[tClass],
-      [tDay]: updateDay(newTimetable[tClass]?.[tDay], tPeriod, newTgtSlot)
-    }
-  };
-
-  return { success: true, newTimetable };
-};
-
-// Takma ad (Alias)
-export const swapTeacherLessons = executeTeacherSwap;

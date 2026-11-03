@@ -1,4 +1,3 @@
-import React from 'react';
 import { Users, Building2 } from 'lucide-react';
 
 export default function CapacityBar({ students = [], rooms = [], activeGrades = [] }) {

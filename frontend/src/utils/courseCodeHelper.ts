@@ -91,17 +91,6 @@ export const generateCourseCode = (subjectName = '', gradeOrClassName = '') => {
   return `${clean.slice(0, 3)}${grade}`;
 };
 
-/**
- * Ders adını ve kodunu birleştirip formatlar
- * Örn: "Matematik (MAT9)" veya sadece kod varsa kodu döndürür
- */
-export const formatCourseDisplay = (subject = '', code = '') => {
-  if (!code) return subject;
-  if (!subject) return code;
-  if (subject.toUpperCase() === code.toUpperCase()) return code;
-  return `${subject} (${code})`;
-};
-
 // Yaygın Ortaöğretim Müfredat Ders Şablonları (Manuel Eklemede Hızlı Seçim İçin)
 export const COMMON_SUBJECT_TEMPLATES = [
   { name: 'Türk Dili ve Edebiyatı', rootCode: 'EDB', hours: 5, category: 'Dil ve Edebiyat' },

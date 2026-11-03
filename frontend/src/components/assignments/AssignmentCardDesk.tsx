@@ -15,13 +15,7 @@ import {
   Sparkles, 
   X, 
   Copy, 
-  Filter, 
-  Layers, 
-  Clock, 
-  ChevronRight, 
-  UserCheck, 
-  ShieldCheck, 
-  Info 
+  Layers 
 } from 'lucide-react';
 import { generateCourseCode } from '../../utils/courseCodeHelper';
 import { CURRICULUM_TEMPLATES, suggestCurriculumTemplate } from '../../utils/curriculumTemplates';
@@ -312,7 +306,6 @@ export default function AssignmentCardDesk() {
   const handleApplyTemplate = (template) => {
     if (!currentClass || !template) return;
 
-    const existingSubjects = new Set((currentClass.courses || []).map(c => c.subject.toLowerCase().trim()));
     const newCoursesFromTemplate = template.courses.map(tCourse => ({
       id: `co_${Date.now().toString(36)}_${Math.random().toString(36).substr(2, 5)}`,
       subject: tCourse.subject,

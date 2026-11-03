@@ -1,5 +1,5 @@
 // frontend/src/components/telemetry/TelemetryModal.jsx
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Cpu, 
   Clock, 
@@ -7,10 +7,7 @@ import {
   CheckCircle2, 
   Sparkles, 
   Layers, 
-  ShieldCheck,
   Server,
-  CalendarCheck,
-  Zap,
   TrendingDown,
   Users,
   Terminal

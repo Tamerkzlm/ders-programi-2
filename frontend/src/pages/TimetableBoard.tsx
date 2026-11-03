@@ -1,44 +1,11 @@
-// frontend/src/pages/TimetableBoard.jsx
+// frontend/src/pages/TimetableBoard.tsx
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useNavigate, useLocation } from 'react-router-dom'; 
-import { Calendar, Users, GraduationCap, Search, AlertCircle, AlertTriangle, ArrowLeft, Undo2, Redo2, Pin, Play, ShieldCheck, Zap, Sparkles, ArrowRightLeft, QrCode, FileSpreadsheet, RotateCcw } from 'lucide-react';
-import { calculateTeacherDutyDay } from '../utils/dutyDayCalculator';
-import { findSmartSwapOpportunities } from '../utils/smartSwapEngine';
+import { Calendar, Users, GraduationCap, AlertCircle, AlertTriangle, ArrowLeft, Undo2, Redo2, Pin, Play, FileSpreadsheet, RotateCcw } from 'lucide-react';
 import TeacherTimetable from '../components/timetable/TeacherTimetable';
 import ClassTimetable from '../components/timetable/ClassTimetable';
 import MasterSheet from '../components/timetable/MasterSheet';
-
-// 🎨 MODERN VE YUMUŞAK GRADYAN RENK PALETİ (Her sınıf + ders kombinasyonuna özel benzersiz renk üretir)
-const MODERN_GRADIENTS = [
-  'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-xs',
-  'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-xs',
-  'bg-gradient-to-r from-rose-500 to-pink-600 text-white shadow-xs',
-  'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-xs',
-  'bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-xs',
-  'bg-gradient-to-r from-cyan-500 to-sky-600 text-white shadow-xs',
-  'bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white shadow-xs',
-  'bg-gradient-to-r from-lime-600 to-emerald-700 text-white shadow-xs',
-  'bg-gradient-to-r from-indigo-600 to-violet-700 text-white shadow-xs',
-  'bg-gradient-to-r from-teal-600 to-cyan-700 text-white shadow-xs',
-  'bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-xs',
-  'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-xs',
-  'bg-gradient-to-r from-rose-600 to-red-700 text-white shadow-xs',
-  'bg-gradient-to-r from-amber-600 to-yellow-600 text-white shadow-xs',
-  'bg-gradient-to-r from-purple-600 to-indigo-800 text-white shadow-xs',
-  'bg-gradient-to-r from-teal-700 to-emerald-900 text-white shadow-xs'
-];
-
-// Sınıf adı ve ders adını birleştirerek her şubeye özel sabit ve modern renk üretici
-const getUniqueSubjectStyle = (subjectName = '', className = '') => {
-  const key = `${className}-${subjectName}`.toLowerCase();
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) {
-    hash = key.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const index = Math.abs(hash) % MODERN_GRADIENTS.length;
-  return MODERN_GRADIENTS[index];
-};
 
 export default function TimetableBoard() {
   const { 
@@ -63,9 +30,8 @@ export default function TimetableBoard() {
   const incomingMode = location.state?.viewMode || 'teacher';
   
   const [viewMode, setViewMode] = useState(incomingMode);
-  const [searchTerm, setSearchTerm] = useState('');
   const [activeTeacherId, setActiveTeacherId] = useState(incomingTeacherId || teachers[0]?.id || '');
-  const [alertMsg, setAlertMsg] = useState(null);
+  const [alertMsg, setAlertMsg] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   useEffect(() => {
@@ -74,70 +40,6 @@ export default function TimetableBoard() {
       setViewMode('teacher');
     }
   }, [location.state, location.search]);
-
-  // 👤 ÖĞRETMEN DERS PROGRAMI ÖNİZLEME MODALI
-  const [teacherScheduleModal, setTeacherScheduleModal] = useState(null);
-
-  // ⚡ SMART SWAP (AKILLI TAKAS) MODAL YÖNETİCİSİ
-  const [smartSwapModal, setSmartSwapModal] = useState(null);
-
-  const handleOpenSmartSwap = (classId, className, day, period, slot) => {
-    const opportunities = findSmartSwapOpportunities({
-      classId,
-      sourceDay: day,
-      sourcePeriod: period,
-      timetable,
-      teachers,
-      classrooms,
-      settings
-    });
-
-    const teacherName = teachers.find(t => t.id === slot.teacherId)?.name || 'Öğretmen';
-
-    setSmartSwapModal({
-      classId,
-      className,
-      day,
-      period,
-      slot,
-      teacherName,
-      opportunities
-    });
-  };
-
-  const handleExecuteSwap = (opp) => {
-    if (!smartSwapModal) return;
-    const { classId, day, period, slot } = smartSwapModal;
-
-    handleCellMoveOrSwap(
-      classId,
-      {
-        classId,
-        day,
-        period,
-        teacherId: slot.teacherId
-      },
-      {
-        classId,
-        day: opp.targetDay,
-        period: opp.targetPeriod
-      }
-    );
-
-    if (opp.type === 'swap') {
-      setAlertMsg(`⚡ Akıllı Takas Başarılı: ${slot.subject} ve ${opp.targetSubject} karşılıklı değiştirildi!`);
-    } else {
-      setAlertMsg(`⚡ Ders Başarıyla ${opp.targetDay} ${opp.targetPeriod}. saate kaydırıldı!`);
-    }
-
-    setSmartSwapModal(null);
-  };
-
-  const isPinnedSlot = (classId, day, period) => {
-    return (pinnedSlots || []).some(
-      (p) => p.classId === classId && p.day === day && Number(p.period) === Number(period)
-    );
-  };
 
   // 🔄 UNDO / REDO (GERİ AL / İLERİ AL) DURUM YÖNETİMİ
   const [history, setHistory] = useState(() => timetable ? [JSON.parse(JSON.stringify(timetable))] : []);
@@ -203,18 +105,6 @@ export default function TimetableBoard() {
   const numPeriods = settings?.periodsPerDay || 8;
   const periodsArray = Array.from({ length: numPeriods }, (_, i) => i + 1);
   const daysArray = settings?.days || [];
-  const schoolTitle = settings?.schoolName || 'Hz. Ayşe Kız Anadolu İmam Hatip Lisesi';
-  const principalTitle = settings?.principalName ? `${settings.principalName}\nOkul Müdürü` : 'Okul Müdürü';
-
-  const getTeacherTotalLoad = (teacherId) => {
-    let total = 0;
-    classrooms.forEach(c => {
-      c.courses?.forEach(co => {
-        if (co.teacherId === teacherId) total += co.hoursPerWeek;
-      });
-    });
-    return total;
-  };
 
   if (!timetable || Object.keys(timetable).length === 0) {
     return (
@@ -497,35 +387,6 @@ export default function TimetableBoard() {
     }
   };
 
-
-  // Öğretmen için atanmamış (havuzda bekleyen) dersleri hesaplar
-  const getPoolCoursesForTeacher = (teacherId) => {
-    const poolItems = [];
-    classrooms.forEach(c => {
-      (c.courses || []).forEach(course => {
-        if (course.teacherId === teacherId) {
-          let assigned = 0;
-          Object.keys(timetable[c.id] || {}).forEach(d => {
-            (timetable[c.id][d] || []).forEach(s => {
-              if (s.subject === course.subject && s.teacherId === teacherId) {
-                assigned++;
-              }
-            });
-          });
-          const rem = course.hoursPerWeek - assigned;
-          if (rem > 0) {
-            poolItems.push({
-              course,
-              classroom: c,
-              remainingHours: rem
-            });
-          }
-        }
-      });
-    });
-    return poolItems;
-  };
-
   // 4. Hücre Renklendirmesi için Çakışma ve Müsaitlik Kontrolü
   const checkCellConflict = (classId, day, period, teacherId) => {
     let hasTeacherConflict = false;
@@ -554,33 +415,6 @@ export default function TimetableBoard() {
 
     return { hasTeacherConflict, conflictClassName, isTeacherUnavailable };
   };
-
-  const generateTeacherMatrix = () => {
-    const matrix = {};
-    teachers.forEach(t => {
-      matrix[t.id] = {};
-      daysArray.forEach(day => { matrix[t.id][day] = {}; });
-    });
-
-    Object.keys(timetable).forEach(cId => {
-      const className = classrooms.find(c => c.id === cId)?.name || 'Sınıf';
-      daysArray.forEach(day => {
-        const slots = timetable[cId]?.[day] || [];
-        slots.forEach(slot => {
-          if (matrix[slot.teacherId] && matrix[slot.teacherId][day]) {
-            matrix[slot.teacherId][day][slot.period] = {
-              subject: slot.subject,
-              className: className,
-              classId: cId
-            };
-          }
-        });
-      });
-    });
-    return matrix;
-  };
-
-  const teacherMatrix = generateTeacherMatrix();
 
   return (
     <div className="p-6 space-y-6 transition-all duration-300 print:p-0 print:bg-white max-w-7xl mx-auto">
@@ -680,7 +514,7 @@ export default function TimetableBoard() {
 
           <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner">
             <button
-              onClick={() => { setViewMode('classroom'); setSearchTerm(''); }}
+              onClick={() => setViewMode('classroom')}
               className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all ${
                 viewMode === 'classroom' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
               }`}
@@ -688,7 +522,7 @@ export default function TimetableBoard() {
               <GraduationCap size={15} /> Sınıf Programı
             </button>
             <button
-              onClick={() => { setViewMode('teacher'); setSearchTerm(''); }}
+              onClick={() => setViewMode('teacher')}
               className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all ${
                 viewMode === 'teacher' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
               }`}
@@ -696,7 +530,7 @@ export default function TimetableBoard() {
               <Users size={15} /> Öğretmen Programı
             </button>
             <button
-              onClick={() => { setViewMode('master'); setSearchTerm(''); }}
+              onClick={() => setViewMode('master')}
               className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all ${
                 viewMode === 'master' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
               }`}
@@ -764,8 +598,6 @@ export default function TimetableBoard() {
           togglePinSlot={togglePinSlot}
           handleCellMoveOrSwap={handleCellMoveOrSwap}
           handleDeleteSlot={handleDeleteSlot}
-          handleOpenSmartSwap={handleOpenSmartSwap}
-          getUniqueSubjectStyle={getUniqueSubjectStyle}
           checkCellConflict={checkCellConflict}
         />
       )}
@@ -800,329 +632,7 @@ export default function TimetableBoard() {
             setActiveTeacherId(tId);
             setViewMode('teacher');
           }}
-          schoolName={schoolTitle}
         />
-      )}
-
-      {smartSwapModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-gray-100 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
-            
-            {/* BAŞLIK */}
-            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 flex justify-between items-start">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
-                    <Zap size={16} />
-                  </div>
-                  <h3 className="font-black text-sm uppercase tracking-wide">Smart Swap (Akıllı Takas)</h3>
-                </div>
-                <p className="text-xs text-slate-300">
-                  {smartSwapModal.className} • <span className="font-bold text-amber-300">{smartSwapModal.slot.subject}</span> ({smartSwapModal.teacherName})
-                </p>
-                <div className="text-[10px] text-slate-400 font-semibold">
-                  Mevcut Konum: {smartSwapModal.day} {smartSwapModal.period}. Ders
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setSmartSwapModal(null)}
-                className="text-slate-400 hover:text-white bg-white/10 hover:bg-white/20 rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold transition-all cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* İÇERİK - ÖNERİLER LİSTESİ */}
-            <div className="p-5 overflow-y-auto space-y-3 flex-1">
-              <div className="flex justify-between items-center text-xs font-bold text-gray-700 pb-1">
-                <span>Tespit Edilen Çakışmasız Takas Fırsatları:</span>
-                <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-md">
-                  {smartSwapModal.opportunities.length} Seçenek
-                </span>
-              </div>
-
-              {smartSwapModal.opportunities.length === 0 ? (
-                <div className="p-8 text-center bg-gray-50 rounded-2xl border border-dashed border-gray-200 space-y-2">
-                  <AlertCircle size={28} className="mx-auto text-amber-500" />
-                  <div className="text-xs font-bold text-gray-700">Uygun Takas Bulunamadı</div>
-                  <p className="text-[11px] text-gray-500 max-w-xs mx-auto">
-                    Öğretmenlerin kapalı saatleri veya diğer sınıflardaki ders çakışmaları nedeniyle bu saat için güvenli bir alternatif tespit edilemedi.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {smartSwapModal.opportunities.map((opp, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                        opp.benefitType === 'improved'
-                          ? 'bg-emerald-50/70 border-emerald-300 hover:border-emerald-400 shadow-2xs'
-                          : opp.benefitType === 'worse'
-                          ? 'bg-amber-50/40 border-amber-200 hover:border-amber-300'
-                          : 'bg-white border-gray-200 hover:border-blue-300 shadow-2xs'
-                      }`}
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-black text-gray-900">
-                            {opp.targetDay} {opp.targetPeriod}. Ders
-                          </span>
-                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
-                            opp.benefitType === 'improved'
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                              : opp.benefitType === 'worse'
-                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                              : 'bg-blue-50 text-blue-700 border border-blue-200'
-                          }`}>
-                            {opp.badgeText}
-                          </span>
-                        </div>
-
-                        <div className="text-xs text-gray-700 font-medium">
-                          {opp.type === 'swap' ? (
-                            <>
-                              <span className="font-bold text-blue-700">{opp.targetSubject}</span> ({opp.targetTeacher?.name}) ile yer değiştirir.
-                            </>
-                          ) : (
-                            <>Bu saat boş; ders doğrudan bu saate kaydırılır.</>
-                          )}
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleExecuteSwap(opp)}
-                        className={`px-4 py-2 rounded-xl text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs ${
-                          opp.benefitType === 'improved'
-                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                            : 'bg-blue-600 hover:bg-blue-700 text-white'
-                        }`}
-                      >
-                        <ArrowRightLeft size={13} />
-                        <span>Uygula</span>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* ALT BİLGİ */}
-            <div className="p-4 bg-gray-50 border-t border-gray-100 text-center">
-              <span className="text-[10px] text-gray-400 font-medium">
-                💡 Yapılan tüm akıllı takaslar Geri Al (Ctrl+Z) ile anında eski haline döndürülebilir.
-              </span>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 👤 ÖĞRETMEN HAFTALIK DERS PROGRAMI ÖNİZLEME MODALI */}
-      {/* ========================================================================= */}
-      {teacherScheduleModal && (
-        <div 
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200"
-          onClick={() => setTeacherScheduleModal(null)}
-        >
-          <div 
-            className="bg-white rounded-3xl shadow-2xl border border-gray-200 w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* MODAL BAŞLIK */}
-            {(() => {
-              const t = teacherScheduleModal;
-              const tLoad = getTeacherTotalLoad(t.id);
-              const dutyDay = calculateTeacherDutyDay(t.id, timetable, settings);
-              const isOverload = tLoad > 30;
-
-              // Bu öğretmenin kilit durumu
-              let tAssignedSlots = 0;
-              let tPinnedSlots = 0;
-              Object.keys(timetable || {}).forEach((cId) => {
-                const daysMap = timetable[cId] || {};
-                Object.keys(daysMap).forEach((d) => {
-                  (daysMap[d] || []).forEach((s) => {
-                    if (s.teacherId === t.id) {
-                      tAssignedSlots++;
-                      const isPin = (pinnedSlots || []).some(
-                        (p) => p.classId === cId && p.day === d && Number(p.period) === Number(s.period)
-                      );
-                      if (isPin) tPinnedSlots++;
-                    }
-                  });
-                });
-              });
-              const isFullyPinned = tAssignedSlots > 0 && tPinnedSlots === tAssignedSlots;
-
-              return (
-                <>
-                  <div className="p-5 bg-gradient-to-r from-slate-900 to-blue-950 text-white flex items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2.5 flex-wrap">
-                        <h3 className="font-extrabold text-base sm:text-lg tracking-tight">
-                          {t.name.toUpperCase()}
-                        </h3>
-                        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
-                          {t.branch}
-                        </span>
-                        {t.isAdministrator && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-400/30">
-                            🏛️ İdareci
-                          </span>
-                        )}
-                        {dutyDay && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
-                            <ShieldCheck size={12} />
-                            <span>Nöbet: {dutyDay}</span>
-                          </span>
-                        )}
-                        {isOverload && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30">
-                            ⚠️ Aşırı Yük ({tLoad} Saat)
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-300">
-                        Haftalık Toplam Ders Yükü: <strong className="text-white">{tLoad} Saat</strong> • Günlük Kapasite: {t.maxPerDay || numPeriods} Saat
-                      </p>
-                    </div>
-
-                    <button 
-                      type="button"
-                      onClick={() => setTeacherScheduleModal(null)}
-                      className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer shrink-0"
-                      title="Kapat (ESC)"
-                    >
-                      ✕
-                    </button>
-                  </div>
-
-                  {/* MODAL GÖVDE: HAFTALIK DERS PROGRAMI ÇİZELGESİ */}
-                  <div className="p-4 sm:p-6 overflow-y-auto space-y-4">
-                    <div className="overflow-x-auto border border-gray-200 rounded-2xl shadow-2xs">
-                      <table className="w-full text-center border-collapse text-xs">
-                        <thead>
-                          <tr className="bg-slate-50 border-b border-gray-200 text-gray-600">
-                            <th className="p-3 w-24 font-bold border-r border-gray-200 text-slate-700 bg-slate-100/50">Gün</th>
-                            {Array.from({ length: numPeriods }, (_, pIdx) => pIdx + 1).map(period => (
-                              <th key={period} className="p-3 font-extrabold text-slate-800 border-r border-gray-200 last:border-r-0">
-                                {period}. Saat
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {(settings?.days || []).map(day => (
-                            <tr key={day} className="hover:bg-slate-50/50 transition-colors">
-                              <td className="p-2.5 font-bold text-gray-700 bg-slate-50/80 border-r border-gray-200">
-                                {day}
-                              </td>
-
-                              {Array.from({ length: numPeriods }, (_, pIdx) => pIdx + 1).map(period => {
-                                // Bu öğretmenin bu gün bu saatteki dersini bul
-                                let activeSlot = null;
-                                let activeClassId = null;
-                                let activeClassName = null;
-
-                                Object.keys(timetable || {}).forEach(cId => {
-                                  const daySlots = timetable[cId]?.[day] || [];
-                                  const matched = daySlots.find(s => s.teacherId === t.id && Number(s.period) === period);
-                                  if (matched) {
-                                    activeSlot = matched;
-                                    activeClassId = cId;
-                                    activeClassName = classrooms.find(c => c.id === cId)?.name || 'Sınıf';
-                                  }
-                                });
-
-                                // Kapalı saat mi?
-                                const isClosed = (t.unavailable?.[day] || []).includes(period);
-                                const isPinned = activeClassId && isPinnedSlot(activeClassId, day, period);
-
-                                return (
-                                  <td key={period} className="p-2 border-r border-gray-200 last:border-r-0 min-w-[110px] h-14 align-middle">
-                                    {activeSlot ? (
-                                      <div className={`p-2 rounded-xl text-center shadow-xs transition-transform hover:scale-102 ${getUniqueSubjectStyle(activeSlot.subject, activeClassName)}`}>
-                                        <div className="font-extrabold text-[11px] leading-tight flex items-center justify-center gap-1">
-                                          <span>{activeClassName}</span>
-                                          {isPinned && <Pin size={10} className="fill-white shrink-0" />}
-                                        </div>
-                                        <div className="text-[10px] opacity-90 truncate mt-0.5 font-medium">
-                                          {activeSlot.subject}
-                                        </div>
-                                      </div>
-                                    ) : isClosed ? (
-                                      <div className="bg-gray-100 text-gray-400 p-2 rounded-xl text-[10px] font-semibold border border-dashed border-gray-200 flex items-center justify-center gap-1">
-                                        <span>🔒 Kapalı</span>
-                                      </div>
-                                    ) : (
-                                      <span className="text-gray-300 text-xs italic">—</span>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* MODAL ALT ÇUBUK / BUTONLAR */}
-                  <div className="p-4 bg-gray-50 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      {tAssignedSlots > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const res = toggleTeacherSchedulePin(t.id);
-                            if (res?.action === 'pinned') {
-                              setAlertMsg(`🔒 Sayın ${t.name} öğretmeninin programı kilitlendi!`);
-                            } else {
-                              setAlertMsg(`🔓 Sayın ${t.name} öğretmeninin tüm ders kilitleri kaldırıldı.`);
-                            }
-                          }}
-                          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            isFullyPinned
-                              ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-xs'
-                              : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-300'
-                          }`}
-                        >
-                          <Pin size={13} className={isFullyPinned ? "fill-white" : ""} />
-                          <span>{isFullyPinned ? "Tüm Program Kilitli (Kaldır)" : "Bu Öğretmeni Kilitle"}</span>
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setViewMode('teacher');
-                          setSearchTerm(t.name);
-                          setTeacherScheduleModal(null);
-                        }}
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition-all cursor-pointer"
-                      >
-                        <Users size={13} />
-                        <span>Öğretmenler Çarşaf Görünümünde Aç</span>
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setTeacherScheduleModal(null)}
-                      className="px-5 py-2 rounded-xl text-xs font-bold bg-gray-200 hover:bg-gray-300 text-gray-700 transition-all cursor-pointer"
-                    >
-                      Kapat
-                    </button>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        </div>
       )}
 
       {/* 🧹 PROGRAMI SIFIRLA ONAY MODALI */}

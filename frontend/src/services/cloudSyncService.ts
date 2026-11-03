@@ -442,22 +442,6 @@ export const signOutAndPurgeLocal = async (purgeLocalData = true) => {
 };
 
 /**
- * 🔄 Paylaşım Linkini (share_code) Yenileme
- */
-export const rotateSchoolShareCode = async () => {
-  if (!isSupabaseConfigured || !supabase) return null;
-  const { data, error } = await supabase.rpc('rotate_school_share_code');
-  if (error) throw error;
-  if (data) {
-    const current = useCloudSyncStore.getState().schoolRecord;
-    useCloudSyncStore.getState().setCloudState({
-      schoolRecord: current ? { ...current, share_code: data } : { share_code: data },
-    });
-  }
-  return data;
-};
-
-/**
  * 🎧 Global Dinleyicileri Başlat (App.jsx içinde 1 kez çağrılır)
  */
 export const initCloudSyncListeners = () => {

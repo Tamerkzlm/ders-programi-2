@@ -12,4 +12,4 @@ else
   node frontend/scripts/bump-version.mjs
 fi
 
-git add frontend/version.json
+git add frontend/version.json frontend/package.json

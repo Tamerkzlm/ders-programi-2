@@ -5,15 +5,8 @@
  * Sıfır harici bağımlılık, React 19 ile %100 uyumlu ve tamamen offline çalışır.
  */
 
-// Basit QR Matrix Oluşturucu ve SVG Render Bileşeni
-export const createQRCodeDataUri = (text, size = 160) => {
-  // SVG tabanlı QR kodu üret
-  const svgString = generateQRCodeSVGString(text, size);
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svgString)}`;
-};
-
 // Standart QR Kod SVG String Üretici
-export const generateQRCodeSVGString = (text, size = 160) => {
+const generateQRCodeSVGString = (text: string, size = 160) => {
   const matrix = generateQRMatrix(text);
   const n = matrix.length;
   const cellSize = (size / (n + 2)).toFixed(2);

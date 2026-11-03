@@ -1,4 +1,4 @@
-// frontend/src/pages/DykPlanner.jsx
+// frontend/src/pages/DykPlanner.tsx
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -22,14 +22,11 @@ import {
   Calendar,
   Sliders,
   ChevronRight,
-  Info,
   Building2,
   School,
   UserPlus,
   UserMinus,
   UserCheck,
-  FileSpreadsheet,
-  ShieldCheck,
   Star,
   CheckSquare,
   ArrowRightLeft,
@@ -44,12 +41,10 @@ import {
   executeDykSwap,
   placeUnassignedDykActivity,
   checkDykSlotAvailability,
-  isTeacherFreeInDyk,
   evaluateDykSwapOpportunity,
   getDykBlockTimes,
   formatDykScheduleHeaderTimes
 } from '../utils/dykEngine';
-import { getCourseColorClass } from '../utils/courseColors';
 
 export default function DykPlanner() {
   const navigate = useNavigate();
@@ -498,21 +493,7 @@ export default function DykPlanner() {
   // -------------------------------------------------------------
   const [assignClassId, setAssignClassId] = useState(dykGroups?.[0]?.id || "");
   const [assignSubject, setAssignSubject] = useState("Matematik");
-  const [assignTeacherId, setAssignTeacherId] = useState(dykEligibleTeachers?.[0]?.id || teachers?.[0]?.id || "");
   const [assignBlocks, setAssignBlocks] = useState(1);
-  const [assignmentFilterClass, setAssignmentFilterClass] = useState("ALL");
-
-  const DYK_COMMON_SUBJECTS = [
-    "Matematik",
-    "Fizik",
-    "Kimya",
-    "Biyoloji",
-    "Türk Dili ve Edebiyatı",
-    "Coğrafya",
-    "Tarih",
-    "Felsefe",
-    "İngilizce"
-  ];
 
   const resolveTeacherSubject = (teacher) => {
     if (teacher.branch) {
@@ -551,7 +532,6 @@ export default function DykPlanner() {
         blocksPerWeek: blocks
       });
 
-      setAssignTeacherId(teacher.id);
       setAssignSubject(subjectToUse);
       showToast(`✓ "${teacher.name}" (${subjectToUse} · ${blocks} Blok) "${getGroupName(assignClassId)}" sınıfına eşlendi.`);
     }
@@ -585,7 +565,6 @@ export default function DykPlanner() {
         subject: subjectToUse,
         blocksPerWeek: blocks
       });
-      setAssignTeacherId(teacher.id);
       setAssignSubject(subjectToUse);
       showToast(`✓ "${teacher.name}" (${subjectToUse} · ${blocks} Blok) "${getGroupName(assignClassId)}" sınıfına eşlendi.`);
     }
@@ -755,23 +734,6 @@ export default function DykPlanner() {
         showToast(`🎉 Toplam ${allNewAssignments.length} branş ataması tüm sınıflara başarıyla eklendi!`);
       }
     });
-  };
-
-  const handleAddAssignment = (e) => {
-    e?.preventDefault?.();
-    if (!assignClassId || !assignTeacherId || !assignSubject.trim()) {
-      showToast("Lütfen tüm alanları doldurun.");
-      return;
-    }
-    const tObj = teachers.find(t => t.id === assignTeacherId);
-    addDykAssignment({
-      groupId: assignClassId,
-      teacherId: assignTeacherId,
-      teacherName: tObj?.name || '',
-      subject: assignSubject.trim(),
-      blocksPerWeek: Number(assignBlocks) || 1
-    });
-    showToast(`"${assignSubject.trim()}" ders ataması kaydedildi.`);
   };
 
   // -------------------------------------------------------------
@@ -959,12 +921,6 @@ export default function DykPlanner() {
       return dateStr;
     }
   };
-
-  // Filtrelenmiş Atama Listesi
-  const filteredAssignments = useMemo(() => {
-    if (assignmentFilterClass === "ALL") return dykAssignments;
-    return dykAssignments.filter(a => a.groupId === assignmentFilterClass);
-  }, [dykAssignments, assignmentFilterClass]);
 
   // Öğretmen Listesi (DYK Sekmesi İçin)
   const displayedTeachers = useMemo(() => {

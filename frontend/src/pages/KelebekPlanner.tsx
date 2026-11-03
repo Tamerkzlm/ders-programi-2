@@ -1,5 +1,5 @@
 // frontend/src/pages/KelebekPlanner.jsx
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, 
@@ -7,7 +7,6 @@ import {
   RotateCcw, 
   Check, 
   AlertTriangle,
-  Layers,
   LayoutGrid
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';

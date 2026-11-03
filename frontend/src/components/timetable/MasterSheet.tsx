@@ -1,12 +1,10 @@
 // frontend/src/components/timetable/MasterSheet.jsx
 import React, { useState } from 'react';
 import { 
-  FileSpreadsheet, 
   Search, 
   GraduationCap, 
   Users, 
   Lock, 
-  Pin,
   ExternalLink,
   Sparkles,
   ArrowRightLeft
@@ -23,8 +21,7 @@ export default function MasterSheet({
   pinnedSlots = [],
   togglePinSlot,
   handleCellMoveOrSwap,
-  onSelectTeacher,
-  schoolName = 'Antakya Hz. Ayşe Kız AİHL'
+  onSelectTeacher
 }) {
   const [sheetMode, setSheetMode] = useState('classes'); // 'classes' | 'teachers'
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,7 +33,6 @@ export default function MasterSheet({
   // ⚡ SEÇİLEN DERSİN DEĞİŞEBİLECEĞİ DERS SEÇENEKLERİ
   const [selectedSlotForSwap, setSelectedSlotForSwap] = useState(null);
   const [swapMap, setSwapMap] = useState(new Map());
-  const [swapOpportunitiesList, setSwapOpportunitiesList] = useState([]);
 
   const isSlotPinned = (classId, day, period) => {
     return (pinnedSlots || []).some(
@@ -46,7 +42,6 @@ export default function MasterSheet({
 
   const calculateOpportunities = (source) => {
     if (!source || source.fromPool) {
-      setSwapOpportunitiesList([]);
       setSwapMap(new Map());
       return;
     }
@@ -61,7 +56,6 @@ export default function MasterSheet({
       settings: { days: daysArray, periodsPerDay: periodsArray.length }
     });
 
-    setSwapOpportunitiesList(opps);
     const map = new Map();
     opps.forEach(o => map.set(`${o.targetDay}-${o.targetPeriod}`, o));
     setSwapMap(map);
@@ -81,7 +75,6 @@ export default function MasterSheet({
   const handleSelectSlot = (classId, day, period, slot) => {
     if (selectedSlotForSwap && selectedSlotForSwap.classId === classId && selectedSlotForSwap.day === day && Number(selectedSlotForSwap.period) === Number(period)) {
       setSelectedSlotForSwap(null);
-      setSwapOpportunitiesList([]);
       setSwapMap(new Map());
       setDraggedSource(null);
       return;
@@ -112,7 +105,6 @@ export default function MasterSheet({
       }
     );
     setSelectedSlotForSwap(null);
-    setSwapOpportunitiesList([]);
     setSwapMap(new Map());
     setDraggedSource(null);
   };

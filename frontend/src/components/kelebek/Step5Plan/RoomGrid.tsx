@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import SeatCell from './SeatCell';
 import { getSeatLabel } from '../../../utils/kelebek/algorithm';
 

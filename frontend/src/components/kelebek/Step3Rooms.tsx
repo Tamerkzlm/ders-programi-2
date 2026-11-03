@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Plus, Trash2, ChevronRight, ChevronLeft, Building2, RotateCcw, Copy, Edit2, Check
 } from 'lucide-react';
@@ -139,7 +139,7 @@ export default function Step3Rooms({ rooms = [], onChange, onNext, onBack }: any
     setEditingRoomId(null);
   };
 
-  const deleteRowFromRoom = (roomId, rowIndex) => {
+  const deleteRowFromRoom = (roomId, _rowIndex) => {
     onChange(rooms.map(r => {
       if (r.id !== roomId) return r;
       const newRows = r.rows - 1;

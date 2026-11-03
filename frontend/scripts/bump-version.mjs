@@ -1,5 +1,5 @@
 // frontend/scripts/bump-version.mjs
-// Otomatik Sürüm Artırıcı (2.4 -> 2.41 -> 2.42 ... veya --major ile 3.0)
+// Otomatik Sürüm Artırıcı (Örn: 3.0 -> 3.1 -> 3.2 ... veya --major ile 4.0)
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const versionFilePath = path.resolve(__dirname, '../version.json');
+const packageJsonPath = path.resolve(__dirname, '../package.json');
 
 const args = process.argv.slice(2);
 const isMajor = args.includes('--major');
@@ -26,13 +27,19 @@ if (customVersion) {
   data.minor = 0;
   data.version = `${data.major}.0`;
 } else {
-  // 2.4 -> 2.41 -> 2.42 ...
-  const currentMinor = Number(data.minor) || 40;
-  data.minor = currentMinor < 40 ? currentMinor * 10 + 1 : currentMinor + 1;
+  const currentMinor = Number.isFinite(Number(data.minor)) ? Number(data.minor) : 0;
+  data.minor = currentMinor + 1;
   data.version = `${data.major}.${data.minor}`;
 }
 
 data.updatedAt = new Date().toISOString().split('T')[0];
 
 fs.writeFileSync(versionFilePath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+
+if (fs.existsSync(packageJsonPath)) {
+  const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+  pkg.version = `${data.major}.${data.minor}.0`;
+  fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+}
+
 console.log(`✅ Sürüm güncellendi: v${data.version} (${data.updatedAt})`);

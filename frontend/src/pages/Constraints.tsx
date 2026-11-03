@@ -13,7 +13,6 @@ import {
   Sun, 
   Flame, 
   RotateCcw,
-  Sparkles,
   Info,
   ShieldCheck,
   Zap,

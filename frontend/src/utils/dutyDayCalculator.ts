@@ -1,5 +1,5 @@
 // frontend/src/utils/dutyDayCalculator.ts
-import type { Teacher, Timetable, Settings } from '../types';
+import type { Timetable, Settings } from '../types';
 /**
  * MEB Standartlarında Öğretmen Nöbet Günü Analiz Motoru
  * 
@@ -121,20 +121,4 @@ export const calculateTeacherDutyDay = (
   }
 
   return bestDay.day;
-};
-
-/**
- * Tüm öğretmenler için toplu nöbet günü haritası üretir
- * { [teacherId]: "Pazartesi" | "Pazartesi veya Çarşamba" | null }
- */
-export const calculateAllTeachersDutyDays = (
-  teachers: Teacher[] = [],
-  timetable: Timetable = {},
-  settings: Partial<Settings> = {}
-): Record<string, string | null> => {
-  const result: Record<string, string | null> = {};
-  (teachers || []).forEach(t => {
-    result[t.id] = calculateTeacherDutyDay(t.id, timetable, settings);
-  });
-  return result;
 };
