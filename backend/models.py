@@ -7,11 +7,14 @@ class Settings(BaseModel):
     schoolName: Optional[str] = "HZ. AYŞE KIZ ANADOLU İMAM HATİP LİSESİ"
     directorName: Optional[str] = "CEMİL MURAT KURU"
     directorTitle: Optional[str] = "Okul Müdür V."
+    principalName: Optional[str] = "Okul Müdürü"
     city: Optional[str] = "HATAY"
     district: Optional[str] = "ANTAKYA"
     days: List[str] 
     periodsPerDay: int 
     lunchBreakAfter: Optional[int] = None
+    lunchAfter: Optional[int] = 4
+    lunchDuration: Optional[int] = 1
 
     class Config:
         extra = "allow"
@@ -52,6 +55,12 @@ class Teacher(BaseModel):
 
     # 🏛️ İDARECİ (OKUL YÖNETİCİSİ) ETİKETİ - Dersleri en son boş kalan yerlere dağıtılır
     isAdministrator: Optional[bool] = False
+    isPartTime: Optional[bool] = False
+
+    # 🎯 VIP / ÖZEL GÜNLÜK SAAT SINIRLARI
+    hasCustomConstraints: Optional[bool] = False
+    customMaxHours: Optional[int] = 8
+    customMinHours: Optional[int] = 2
 
     # 🌊 ESNEK / KAYAN TERCİHLER ("Boş günüm ya da saatim fark etmez" diyen öğretmenler)
     floatingConstraints: Optional[Dict[str, Any]] = Field(default_factory=dict)
