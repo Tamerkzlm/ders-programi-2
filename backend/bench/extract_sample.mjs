@@ -1,16 +1,17 @@
-// appStore.js içindeki gerçek okul verisini (REAL_TEACHERS / REAL_CLASSROOMS) kıyaslama için JSON'a çıkarır.
+// seedData.ts içindeki gerçek okul verisini (REAL_TEACHERS / REAL_CLASSROOMS) kıyaslama için JSON'a çıkarır.
 // Kullanım: node backend/bench/extract_sample.mjs > backend/bench/sample_school.json
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const src = fs.readFileSync(path.join(here, '../../frontend/src/store/appStore.js'), 'utf8');
+const src = fs.readFileSync(path.join(here, '../../frontend/src/store/seedData.ts'), 'utf8');
 
 function grabArray(name) {
-  const start = src.indexOf(`const ${name} = [`);
-  if (start < 0) throw new Error(`${name} bulunamadı`);
-  let i = src.indexOf('[', start), depth = 0;
+  const re = new RegExp(`(?:export\\s+)?const\\s+${name}(?:\\s*:[^=]+)?\\s*=\\s*\\[`);
+  const match = re.exec(src);
+  if (!match) throw new Error(`${name} bulunamadı`);
+  let i = src.indexOf('[', match.index), depth = 0;
   for (let j = i; j < src.length; j++) {
     if (src[j] === '[') depth++;
     else if (src[j] === ']') { depth--; if (depth === 0) return src.slice(i, j + 1); }

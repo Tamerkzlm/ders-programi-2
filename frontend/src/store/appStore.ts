@@ -1135,7 +1135,7 @@ export const useAppStore = create<AppState>()(
         downloadAnchor.remove();
       },
 
-      // 🏫 HZ. AYŞE KIZ AİHL VERİLERİ (Önceden üzerinde çalışılmış hali korunur)
+      // 🏫 HZ. AYŞE KIZ AİHL VERİLERİ (Güncel öğretmen kriterleri ve önceden çalışılmış tablo korunur)
       loadHzAyseDemoData: () => {
         get().saveCurrentSchoolSnapshot();
         let saved = null;
@@ -1144,10 +1144,26 @@ export const useAppStore = create<AppState>()(
           if (raw) saved = JSON.parse(raw);
         } catch (e) {}
 
+        const seedById = new Map(REAL_TEACHERS.map((t) => [t.id, t]));
+        const syncedTeachers = saved?.teachers?.length > 0
+          ? saved.teachers.map((t: Teacher) => {
+              const seed = seedById.get(t.id);
+              if (!seed) return t;
+              return {
+                ...t,
+                unavailable: seed.unavailable,
+                isExempt: seed.isExempt,
+                isAdministrator: seed.isAdministrator,
+                priorityFullDay: seed.priorityFullDay,
+                fillLateHours: seed.fillLateHours
+              };
+            })
+          : REAL_TEACHERS;
+
         if (saved && saved.teachers?.length > 0) {
           set({
             settings: saved.settings,
-            teachers: saved.teachers,
+            teachers: syncedTeachers,
             classrooms: saved.classrooms,
             timetable: saved.timetable || {},
             pinnedSlots: saved.pinnedSlots || [],
@@ -1683,6 +1699,32 @@ export const useAppStore = create<AppState>()(
       
     {
       name: 'hz-ayse-timetable-v1',
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        const schoolName = (state.settings?.schoolName || '').toLowerCase();
+        const isHzAyse = state.demoDataChoice === 'demo' || schoolName.includes('ayşe') || schoolName.includes('ayse');
+        if (isHzAyse && state.teachers?.length > 0) {
+          const SyncFlagKey = 'hz_ayse_pdf_criteria_v2_synced';
+          try {
+            if (!localStorage.getItem(SyncFlagKey)) {
+              const seedById = new Map(REAL_TEACHERS.map((t) => [t.id, t]));
+              state.teachers = state.teachers.map((t) => {
+                const seed = seedById.get(t.id);
+                if (!seed) return t;
+                return {
+                  ...t,
+                  unavailable: seed.unavailable,
+                  isExempt: seed.isExempt,
+                  isAdministrator: seed.isAdministrator,
+                  priorityFullDay: seed.priorityFullDay,
+                  fillLateHours: seed.fillLateHours
+                };
+              });
+              localStorage.setItem(SyncFlagKey, '1');
+            }
+          } catch (e) {}
+        }
+      },
       // 🛡️ 5MB localStorage kota patlamasını (QuotaExceededError) önleyen filtre:
       // Sadece kalıcı veritabanı alanları saklanır; anlık ve geçici veriler filtrelenir.
       partialize: (state) => ({

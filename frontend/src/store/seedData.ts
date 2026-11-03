@@ -39,41 +39,41 @@ export const DEFAULT_DYK_AVAILABILITIES: DykTeacherAvailabilities = {
 
 // 📋 ANTAKYA HZ. AYŞE KIZ AİHL GERÇEK ÖĞRETMEN LİSTESİ (35 ÖĞRETMEN - KISITLAR VE BOŞ GÜNLER DAHİL)
 export const REAL_TEACHERS: Teacher[] = [
-  { id: "t1", name: "PINAR TOKLAR", branch: "IHL", unavailable: { "Cuma": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
-  { id: "t2", name: "CESUR BEYAZÇİÇEK", branch: "TDEB", unavailable: { "Salı": [1, 2] }, isExempt: false },
-  { id: "t3", name: "RIZA DÖNMEZ", branch: "TDEB", unavailable: {}, isExempt: false },
-  { id: "t4", name: "SUNA ÇAKIROĞLU", branch: "TDEB", unavailable: { "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
-  { id: "t5", name: "TAMER KÖZLEME", branch: "MAT", unavailable: { "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false, priorityFullDay: "Pazartesi", fillLateHours: true },
-  { id: "t6", name: "YELİZ OKUYAN", branch: "MAT", unavailable: { "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
-  { id: "t7", name: "SAFFET AYDINER", branch: "MAT", unavailable: { "Salı": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
-  { id: "t8", name: "SEVCAN YOĞUN", branch: "FİZ", unavailable: { "Cuma": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
-  { id: "t9", name: "FERİDUN KİMYA", branch: "KIM", unavailable: { "Pazartesi": [1, 2, 3, 4, 5, 6, 7, 8], "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: true }, // 8 Saat - Part-time / Muaf (Salı-Çarşamba)
-  { id: "t10", name: "ÖZGE CEYLAN", branch: "KIM", unavailable: { "Cuma": [7, 8] }, isExempt: false },
-  { id: "t11", name: "BAHAR DİNDAR YILMAZ", branch: "BIO", unavailable: {}, isExempt: false },
+  { id: "t1", name: "PINAR TOKLAR", branch: "IHL", unavailable: { "Salı": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t2", name: "CESUR BEYAZÇİÇEK", branch: "TDEB", unavailable: { "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t3", name: "RIZA DÖNMEZ", branch: "TDEB", unavailable: { "Pazartesi": [1, 2], "Salı": [1, 2], "Çarşamba": [1, 2], "Perşembe": [1, 2], "Cuma": [1, 2] }, isExempt: false },
+  { id: "t4", name: "SUNA ÇAKIROĞLU", branch: "TDEB", unavailable: { "Pazartesi": [1], "Salı": [1], "Çarşamba": [1], "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [1] }, isExempt: false },
+  { id: "t5", name: "TAMER KÖZLEME", branch: "MAT", unavailable: { "Çarşamba": [5, 6, 7, 8], "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [1, 2, 3, 4] }, isExempt: false, priorityFullDay: "Pazartesi", fillLateHours: true },
+  { id: "t6", name: "YELİZ OKUYAN", branch: "MAT", unavailable: { "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8], "Perşembe": [1, 2, 3, 4] }, isExempt: false },
+  { id: "t7", name: "SAFFET AYDINER", branch: "MAT", unavailable: { "Pazartesi": [1], "Salı": [1, 2, 3, 4, 5, 6, 7, 8], "Çarşamba": [1], "Perşembe": [1], "Cuma": [1, 2, 3, 4] }, isExempt: false },
+  { id: "t8", name: "SEVCAN YOĞUN", branch: "FİZ", unavailable: { "Salı": [1, 2, 3, 4, 5, 6, 7, 8], "Çarşamba": [5, 6, 7, 8] }, isExempt: false },
+  { id: "t9", name: "FERİDUN KİMYA", branch: "KIM", unavailable: { "Pazartesi": [1, 2, 3, 4, 5, 6, 7, 8], "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8], "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: true }, // 8 Saat - Part-time / Muaf (Yalnız Salı)
+  { id: "t10", name: "ÖZGE CEYLAN", branch: "KIM", unavailable: { "Pazartesi": [1, 2, 3, 4], "Cuma": [5, 6, 7, 8] }, isExempt: false },
+  { id: "t11", name: "BAHAR DİNDAR YILMAZ", branch: "BIO", unavailable: { "Pazartesi": [5, 6, 7, 8], "Perşembe": [5, 6, 7, 8] }, isExempt: false },
   { id: "t12", name: "MERYEM AĞCA", branch: "BIO", unavailable: { "Pazartesi": [1, 2, 3, 4, 5, 6, 7, 8], "Salı": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: true }, // 12 Saat - Part-time / Muaf (Çarşamba-Perşembe)
-  { id: "t13", name: "GÖKHAN SAĞMEN", branch: "COG", unavailable: { "Pazartesi": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
-  { id: "t14", name: "MEHMET DAGLI", branch: "ING", unavailable: { "Çarşamba": [1] }, isExempt: false },
-  { id: "t15", name: "ALI BİLGİÇ", branch: "FEL", unavailable: { "Pazartesi": [1, 2] }, isExempt: false },
-  { id: "t16", name: "VOLKAN BARTIK", branch: "COG", unavailable: {}, isExempt: false },
-  { id: "t17", name: "KEMAL KUNDAK", branch: "MAT", unavailable: { "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
-  { id: "t18", name: "SEMA ÇETİN", branch: "IHL", unavailable: {}, isExempt: false },
-  { id: "t19", name: "YASIN DURAK", branch: "IHL", unavailable: {}, isExempt: false },
-  { id: "t20", name: "CEMİL MURAT KURU", branch: "TDEB", unavailable: { "Pazartesi": [1, 2, 3, 4, 5, 6, 7, 8], "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8], "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: true, isAdministrator: true }, // 2 Saat - Müdür V. (Yalnız Salı)
-  { id: "t21", name: "ZÜLEYHA DÖKMECİ", branch: "IHL", unavailable: { "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8], "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: true }, // 10 Saat - Part-time / Muaf (Pazartesi-Salı)
-  { id: "t22", name: "MEHMET USLU", branch: "IHL", unavailable: { "Pazartesi": [1, 2, 3, 4, 5, 6, 7, 8], "Salı": [1, 2, 3, 4, 5, 6, 7, 8], "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: true }, // 11 Saat - Part-time / Muaf (Perşembe-Cuma)
-  { id: "t23", name: "ESRA BEREKET", branch: "ARP", unavailable: {}, isExempt: false },
-  { id: "t24", name: "ABDULSETTAR AY", branch: "MAT", unavailable: { "Cuma": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
-  { id: "t25", name: "SELIM BEYOĞLU", branch: "MAT", unavailable: { "Pazartesi": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
-  { id: "t26", name: "ALI SARIOĞLU", branch: "FİZ", unavailable: {}, isExempt: false },
-  { id: "t27", name: "SUNA ŞERİFOĞLU", branch: "ING", unavailable: { "Salı": [1, 2, 3, 4, 5, 6, 7, 8], "Perşembe": [7, 8] }, isExempt: false },
-  { id: "t28", name: "BÜŞRA AKSOY ÖZTÜRK", branch: "IHL", unavailable: { "Pazartesi": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t13", name: "GÖKHAN SAĞMEN", branch: "COG", unavailable: { "Pazartesi": [1, 2, 7, 8], "Salı": [1, 2, 7, 8], "Çarşamba": [1, 2, 7, 8], "Perşembe": [1, 2, 7, 8], "Cuma": [1, 2, 7, 8] }, isExempt: false },
+  { id: "t14", name: "MEHMET DAGLI", branch: "ING", unavailable: { "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t15", name: "ALI BİLGİÇ", branch: "FEL", unavailable: { "Salı": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t16", name: "VOLKAN BARTIK", branch: "COG", unavailable: { "Perşembe": [5, 6, 7, 8], "Cuma": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t17", name: "KEMAL KUNDAK", branch: "MAT", unavailable: { "Pazartesi": [1, 2], "Salı": [1, 2], "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8], "Perşembe": [1, 2], "Cuma": [1, 2] }, isExempt: false },
+  { id: "t18", name: "SEMA ÇETİN", branch: "IHL", unavailable: { "Pazartesi": [1, 2, 3, 4] }, isExempt: false },
+  { id: "t19", name: "YASIN DURAK", branch: "IHL", unavailable: { "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t20", name: "CEMİL MURAT KURU", branch: "TDEB", unavailable: {}, isExempt: true, isAdministrator: true }, // 2 Saat - Müdür V.
+  { id: "t21", name: "ZÜLEYHA DÖKMECİ", branch: "IHL", unavailable: {}, isExempt: true, isAdministrator: true }, // 10 Saat - İdareci / Muaf
+  { id: "t22", name: "MEHMET USLU", branch: "IHL", unavailable: {}, isExempt: true, isAdministrator: true }, // 11 Saat - İdareci / Muaf
+  { id: "t23", name: "ESRA BEREKET", branch: "ARP", unavailable: { "Pazartesi": [1, 2, 3, 4], "Perşembe": [5, 6, 7, 8], "Cuma": [5, 6, 7, 8] }, isExempt: false },
+  { id: "t24", name: "ABDULSETTAR AY", branch: "MAT", unavailable: { "Pazartesi": [1, 2], "Salı": [1, 2], "Çarşamba": [1, 2], "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [1, 2, 3, 4] }, isExempt: false },
+  { id: "t25", name: "SELIM BEYOĞLU", branch: "MAT", unavailable: { "Pazartesi": [8], "Salı": [8], "Çarşamba": [5, 6, 7, 8], "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [8] }, isExempt: false },
+  { id: "t26", name: "ALI SARIOĞLU", branch: "FİZ", unavailable: { "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t27", name: "SUNA ŞERİFOĞLU", branch: "ING", unavailable: { "Pazartesi": [1], "Salı": [1], "Çarşamba": [1], "Perşembe": [1], "Cuma": [1, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t28", name: "BÜŞRA AKSOY ÖZTÜRK", branch: "IHL", unavailable: { "Salı": [5, 6, 7, 8], "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [5, 6, 7, 8] }, isExempt: false },
   { id: "t29", name: "MEHMET ALKAN", branch: "IHL", unavailable: {}, isExempt: false },
-  { id: "t30", name: "AYŞE NUR GÜLER", branch: "GSBD", unavailable: { "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
-  { id: "t31", name: "MUSTAFA BAYAR", branch: "COG", unavailable: { "Pazartesi": [1, 2, 3, 4, 5, 6, 7, 8], "Salı": [1, 2, 3, 4, 5, 6, 7, 8], "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: true }, // 6 Saat - Part-time / Muaf (Yalnız Perşembe)
-  { id: "t32", name: "DILAY ALTINÖZ", branch: "TAR", unavailable: {}, isExempt: false },
-  { id: "t33", name: "IRMAK KÜÇÜKBAŞ YARAR", branch: "TDEB", unavailable: { "Perşembe": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t30", name: "AYŞE NUR GÜLER", branch: "GSBD", unavailable: { "Pazartesi": [7, 8], "Salı": [7, 8], "Çarşamba": [7, 8], "Perşembe": [7, 8], "Cuma": [7, 8] }, isExempt: false },
+  { id: "t31", name: "MUSTAFA BAYAR", branch: "COG", unavailable: {}, isExempt: true }, // 6 Saat - Part-time / Muaf
+  { id: "t32", name: "DILAY ALTINÖZ", branch: "TAR", unavailable: { "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
+  { id: "t33", name: "IRMAK KÜÇÜKBAŞ YARAR", branch: "TDEB", unavailable: { "Çarşamba": [5, 6, 7, 8] }, isExempt: false },
   { id: "t34", name: "MUSTAFA BULUT", branch: "IHL", unavailable: {}, isExempt: false },
-  { id: "t35", name: "REYYAN GÜNEŞ", branch: "TAR", unavailable: { "Salı": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false }
+  { id: "t35", name: "REYYAN GÜNEŞ", branch: "TAR", unavailable: { "Pazartesi": [1, 2, 3, 4, 5, 6, 7, 8], "Salı": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false }
 ];
 
 // 🏫 ATAMA LİSTESİNDEKİ TÜM SINIFLAR VE BİREBİR DERS ATAMALARI (18 ŞUBE - 720 SAAT)
