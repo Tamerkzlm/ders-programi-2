@@ -288,7 +288,7 @@ const createNativeSupabaseClient = () => {
 
 export const supabase = isSupabaseConfigured ? createNativeSupabaseClient() : null;
 
-// 🛡️ Render Cold-Start Önleyici Arka Plan Uyandırıcı (Pre-Warm)
+// 🛡️ Render Cold-Start Önleyici Arka Plan Uyandırıcı (Pre-Warm) & Yerel Motor Kontrolü
 const DEFAULT_API_URL = import.meta.env.PROD ? 'https://ders-programi-api.onrender.com' : 'http://127.0.0.1:8000';
 const API_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
 let lastWarmPingAt = 0;
@@ -298,6 +298,22 @@ export const preWarmSolverBackend = async () => {
   // 4 dakikada birden sık ping atma
   if (now - lastWarmPingAt < 4 * 60 * 1000) return;
   lastWarmPingAt = now;
+
+  // Önce yerel tam güç motoru (127.0.0.1:8000) açık mı kontrol et; açıksa Render'ı uyandırmaya gerek yok
+  try {
+    const localCtrl = new AbortController();
+    const localTimer = setTimeout(() => localCtrl.abort(), 800);
+    const localRes = await fetch('http://127.0.0.1:8000/health', {
+      method: 'GET',
+      mode: 'cors',
+      cache: 'no-store',
+      signal: localCtrl.signal,
+    });
+    clearTimeout(localTimer);
+    if (localRes.ok) return;
+  } catch {
+    // Yerel motor kapalı, bulutu uyandır
+  }
 
   try {
     const controller = new AbortController();

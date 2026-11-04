@@ -13,8 +13,7 @@ import {
   Terminal
 } from 'lucide-react';
 
-const DEFAULT_API_URL = import.meta.env.PROD ? 'https://ders-programi-api.onrender.com' : 'http://127.0.0.1:8000';
-const API_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
+import { getActiveApiUrl } from '../../store/appStore';
 
 export default function TelemetryModal({ solverTimeout = 300, isGenerating = false, stopAtFirstSolution = false }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -39,7 +38,7 @@ export default function TelemetryModal({ solverTimeout = 300, isGenerating = fal
 
     const fetchProgress = async () => {
       try {
-        const res = await fetch(`${API_URL}/solve/progress`);
+        const res = await fetch(`${getActiveApiUrl()}/solve/progress`);
         if (res.ok) {
           const data = await res.json();
           if (isMounted && data) {

@@ -34,9 +34,45 @@ import type {
   ExamSupervisorResult,
 } from '../types';
 
-// Backend adresi: .env dosyasındaki VITE_API_URL (üretimde otomatik Render API, yerelde 127.0.0.1:8000)
-const DEFAULT_API_URL = import.meta.env.PROD ? 'https://ders-programi-api.onrender.com' : 'http://127.0.0.1:8000';
-const API_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
+// Backend adresi: Yerel 127.0.0.1:8000 motoru açıksa (Netlify üzerinden girilse bile) otomatik yerel tam güç CPU kullanılır,
+// kapalıysa (telefon/tablet vb.) Render bulut API'sine düşer.
+const LOCAL_SOLVER_URL = 'http://127.0.0.1:8000';
+const CLOUD_SOLVER_URL = 'https://ders-programi-api.onrender.com';
+const isLocalHost = typeof window !== 'undefined' && (
+  window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+);
+const DEFAULT_API_URL = isLocalHost
+  ? LOCAL_SOLVER_URL
+  : (import.meta.env.PROD ? CLOUD_SOLVER_URL : LOCAL_SOLVER_URL);
+let activeApiUrl = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
+
+export const getActiveApiUrl = (): string => activeApiUrl;
+
+export const resolveSolverApiUrl = async (): Promise<string> => {
+  if (isLocalHost) {
+    activeApiUrl = LOCAL_SOLVER_URL;
+    return activeApiUrl;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 800);
+    const res = await fetch(`${LOCAL_SOLVER_URL}/health`, {
+      method: 'GET',
+      mode: 'cors',
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      activeApiUrl = LOCAL_SOLVER_URL;
+      return activeApiUrl;
+    }
+  } catch {
+    // Yerel çözücü kapalı, bulut adresini kullan
+  }
+  activeApiUrl = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
+  return activeApiUrl;
+};
 
 // Silme sonrası bile çakışmayan benzersiz kimlik
 const newId = (prefix) => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -1031,7 +1067,8 @@ export const useAppStore = create<AppState>()(
         set({ isGenerating: true, generateResult: null });
 
         try {
-          const response = await fetch(`${API_URL}/solve`, {
+          const targetApiUrl = await resolveSolverApiUrl();
+          const response = await fetch(`${targetApiUrl}/solve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
