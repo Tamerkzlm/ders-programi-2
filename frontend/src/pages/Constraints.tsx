@@ -555,7 +555,7 @@ export default function Constraints() {
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               {[
-                { label: 'İlk Geçerli Çözümde Dur', sub: 'Yıldırım Hızı (1-3 Sn)', value: 0, stopFirst: true, icon: '⚡' },
+                { label: 'İlk Geçerli Çözümde Dur', sub: 'Yıldırım Hızı (1-3 Sn)', value: 85, stopFirst: true, icon: '⚡' },
                 { label: 'Hızlı Test', sub: '60 Sn (1 Dk)', value: 60, stopFirst: false, icon: '⏱️' },
                 { label: 'Dengeli Dağıtım', sub: '300 Sn (5 Dk)', value: 300, stopFirst: false, icon: '⚖️', recommended: true },
                 { label: 'Gelişmiş Optimizasyon', sub: '900 Sn (15 Dk)', value: 900, stopFirst: false, icon: '🧠' }

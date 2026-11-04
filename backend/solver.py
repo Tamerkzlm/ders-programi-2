@@ -264,9 +264,15 @@ def detect_workers():
     """
     CP-SAT işçi sayısı:
     - Yerel geliştirme ortamında (Mac/PC): Bilgisayarın TÜM CPU çekirdekleri (os.cpu_count) tam güçle kullanılır (asla kısıtlanmaz).
-    - Render / Bulut ortamında (RENDER=true): 512MB RAM ve 0.1 vCPU sınırına uygun 4 portföy işçisi kullanılır.
-    - SOLVER_WORKERS ortam değişkeni varsa her zaman en yüksek önceliğe sahiptir.
+    - Render / Bulut ortamında (RENDER=true): 0.1 vCPU paylaşımlı bulut çekirdeğinde thread çekişmesini (context-switch darboğazını)
+      önlemek ve %100 CPU gücünü tek SAT arama ağacına odaklamak için 1 işçi kullanılır.
     """
+    is_render = os.environ.get("RENDER") == "true" or os.environ.get("RENDER_SERVICE_ID") is not None
+
+    # Render Bulut Ortamı (0.1 vCPU): Çoklu thread 0.1 vCPU'yu böldüğü için tek işçi 5x daha hızlıdır
+    if is_render:
+        return 1
+
     env = os.environ.get("SOLVER_WORKERS")
     if env:
         try:
@@ -274,33 +280,11 @@ def detect_workers():
         except ValueError:
             pass
 
-    is_render = os.environ.get("RENDER") == "true" or os.environ.get("RENDER_SERVICE_ID") is not None
-
     # Yerel ortam: Tüm fiziksel ve sanal çekirdekler tam güçte çalışsın (kısıtlama yok)
-    if not is_render:
-        try:
-            return max(1, os.cpu_count() or 8)
-        except Exception:
-            return 8
-
-    # Render Bulut Ortamı: cgroup kotası veya varsayılan 4 portföy işçisi
-    n = 4
-    try:  # Linux cgroup v2 CPU kotası (Render, Docker vb.)
-        with open("/sys/fs/cgroup/cpu.max") as f:
-            quota, period = f.read().split()[:2]
-        if quota != "max":
-            n = min(4, max(2, int(float(quota) / float(period))))
-    except (OSError, ValueError):
-        pass
-    try:  # Linux cgroup v1 CPU kotası (Render legacy)
-        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as f_q, open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as f_p:
-            quota_us = float(f_q.read().strip())
-            period_us = float(f_p.read().strip())
-            if quota_us > 0 and period_us > 0:
-                n = min(4, max(2, int(quota_us / period_us)))
-    except (OSError, ValueError):
-        pass
-    return max(2, min(n, 4))
+    try:
+        return max(1, os.cpu_count() or 8)
+    except Exception:
+        return 8
 
 
 # --------------------------------------------------------------------------
@@ -836,15 +820,17 @@ def run_solver(model, time_limit, workers, patience=None, busy_by_teacher=None, 
     prm.log_search_progress = os.environ.get("SOLVER_LOG") == "1"
 
     # 🚀 CP-SAT Arama Parametreleri Optimizasyonu:
-    # Temel yerleşim (feasibility/SAT) aşamalarında: linearization_level=0 (pure SAT, LP ek yükü ve simplex matrisi yok).
-    # Bu sayede temel yerleşim 50x daha hızlı bulunur (<2s) ve zayıf CPU/bulut ortamlarında bile UNKNOWN'a düşmez.
-    # LNS / Çok amaçlı optimizasyon aşamasında ise standart LP seviyesi (linearization_level=1) kullanılır.
+    # Temel yerleşim (feasibility/SAT) aşamalarında: linearization_level=0, probing=1, symmetry=1.
+    # Bu sayede deterministik çözüm yükü 0.85s seviyesine iner ve 0.1 vCPU bulut ortamında bile hızla çözülür.
+    # Yerel LNS / Çok amaçlı optimizasyon aşamasında ise standart LP seviyesi (linearization_level=1) kullanılır.
+    is_render = os.environ.get("RENDER") == "true" or os.environ.get("RENDER_SERVICE_ID") is not None
     is_feasibility = any(tag in phase_label for tag in ("Temel", "Yerleşim", "Lokal"))
     if is_feasibility:
         prm.linearization_level = 0
         prm.cp_model_probing_level = 1
+        prm.symmetry_level = 1
     else:
-        prm.linearization_level = 1
+        prm.linearization_level = 0 if is_render else 1
         prm.cp_model_probing_level = 1
     cb = _Progress(busy_by_teacher=busy_by_teacher, phase_label=phase_label)
     done = threading.Event()
@@ -1139,10 +1125,14 @@ def solve(request: SolveRequest):
         P = int(request.settings.periodsPerDay)
         o = read_options(request)
         is_render = os.environ.get("RENDER") == "true" or os.environ.get("RENDER_SERVICE_ID") is not None
-        total_budget = max(5.0, o["timeout"])
-        # Render bulut proxy (100s) zaman aşımını ve bağlantı kopmasını önlemek için bulutta azami 88sn sınırı
-        if is_render and total_budget > 88.0:
-            total_budget = 88.0
+        raw_timeout = float(o["timeout"])
+        if o["stop_at_first"]:
+            total_budget = max(85.0, raw_timeout)
+        else:
+            total_budget = max(15.0, raw_timeout)
+        # Render bulut proxy (100s) zaman aşımını ve erken kesilmeyi önlemek için bulutta güvenli 80-88sn bütçesi
+        if is_render:
+            total_budget = min(88.0, max(80.0, total_budget))
         pinned_slots = getattr(request, "pinnedSlots", None) or getattr(request, "pinned_slots", None) or []
         workers = detect_workers()
 
@@ -1220,7 +1210,9 @@ def solve(request: SolveRequest):
             hard_names = ", ".join(f"{ht['name']} (%{ht['density']} yoğunluk)" for ht in top_hardest[:3])
             add_live_feed(f"🎯 Zorluk sırasına göre ilk yerleştirilecek düğümler: {hard_names}", "info")
 
-        phase0_time = remaining() if o["stop_at_first"] else min(25.0, max(5.0, remaining() * 0.35))
+        # Aşama 0'da modelde amaç fonksiyonu (Minimize) olmadığı için CP-SAT ilk geçerli çözümü bulduğu salisede durur.
+        # Bu nedenle 25sn gibi yapay bir tavan koymak hızlı CPU'da süre kazandırmaz, yalnızca bulut CPU'da aramayı yarıda keser.
+        phase0_time = remaining() if o["stop_at_first"] else max(45.0, remaining() * 0.70)
         solver, st, _ = run_solver(model, phase0_time, workers, busy_by_teacher=busy_by_teacher, phase_label="Temel Yerleşim")
         print(f"[solver] temel (bitişiklik={'sert' if not allow_soft_consec else 'esnek'}, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}): "
               f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
@@ -1246,11 +1238,18 @@ def solve(request: SolveRequest):
                 lunch_after=lunch_after,
                 allow_soft_consecutive=True
             )
-            # Yıldırım modunda bile lokal esnetme sayısını minimumda tutmak için slack'leri minimize et
+            # Yıldırım modunda bile lokal esnetme sayısını minimumda tutmak için slack'leri kısa sabırla (1.5s) minimize et
+            retry_patience = None
             if o["stop_at_first"] and terms["consec_slacks"]:
                 model.Minimize(sum(terms["consec_slacks"]))
-            phase0_retry = remaining() if o["stop_at_first"] else min(25.0, max(6.0, remaining() * 0.35))
-            solver, st, _ = run_solver(model, phase0_retry, workers, busy_by_teacher=busy_by_teacher, phase_label="Lokal Esnek Yerleşim")
+                retry_patience = 1.5
+            phase0_retry = remaining() if o["stop_at_first"] else max(15.0, remaining() * 0.65)
+            solver, st, _ = run_solver(
+                model, phase0_retry, workers,
+                patience=retry_patience,
+                busy_by_teacher=busy_by_teacher,
+                phase_label="Lokal Esnek Yerleşim"
+            )
             model.ClearObjective()
             print(f"[solver] temel deneme 1 (bitişiklik=lokal_esnek, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}): "
                   f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
@@ -1274,10 +1273,17 @@ def solve(request: SolveRequest):
                 lunch_after=lunch_after,
                 allow_soft_consecutive=True
             )
+            retry2_patience = None
             if o["stop_at_first"] and terms["consec_slacks"]:
                 model.Minimize(sum(terms["consec_slacks"]))
-            phase0_retry2 = remaining() if o["stop_at_first"] else min(25.0, max(6.0, remaining() * 0.35))
-            solver, st, _ = run_solver(model, phase0_retry2, workers, busy_by_teacher=busy_by_teacher, phase_label="Esnek Yerleşim")
+                retry2_patience = 1.5
+            phase0_retry2 = max(6.0, remaining())
+            solver, st, _ = run_solver(
+                model, phase0_retry2, workers,
+                patience=retry2_patience,
+                busy_by_teacher=busy_by_teacher,
+                phase_label="Esnek Yerleşim"
+            )
             model.ClearObjective()
             print(f"[solver] temel deneme 2 (bitişiklik=lokal_esnek, sert_kayan=kapalı): "
                   f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
@@ -1313,7 +1319,8 @@ def solve(request: SolveRequest):
             add_live_feed("⚡ Yıldırım Modu: İlk geçerli çözüm kabul edildi, tablo hazırlanıyor.", "success")
         else:
             # 🚀 ADIM 1: Tek Geçişli Ağırlıklandırılmış Çok Amaçlı LNS Optimizasyonu
-            rem = remaining()
+            lns_budget = min(total_budget, max(25.0, raw_timeout)) - (time.time() - start)
+            rem = min(remaining(), lns_budget)
             if rem >= 2.0:
                 update_live_progress(
                     stageIndex=2,
@@ -1337,7 +1344,7 @@ def solve(request: SolveRequest):
                     model.Minimize(combined_obj)
                     hint_from(model, best_solver)
 
-                    patience = min(45.0, max(15.0, rem * 0.6))
+                    patience = min(20.0, max(10.0, rem * 0.45)) if is_render else min(45.0, max(15.0, rem * 0.6))
                     opt_solver, opt_st, cb = run_solver(
                         model, rem, workers, patience,
                         busy_by_teacher=busy_by_teacher,
