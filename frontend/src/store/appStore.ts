@@ -1044,6 +1044,30 @@ export const useAppStore = create<AppState>()(
             })
           });
 
+          if (!response.ok) {
+            let errorMsg = `Sunucu Hatası (${response.status})`;
+            try {
+              const errData = await response.json();
+              errorMsg = errData.detail || errData.message || errorMsg;
+            } catch {
+              // Yanıt JSON değilse (örneğin bulut proxy 502/504 HTML zaman aşımı yanıtı)
+            }
+            set({
+              generateResult: {
+                success: false,
+                message: errorMsg,
+                unassignedCount: 0,
+                warnings: [
+                  response.status === 504
+                    ? 'İşlem bulut sunucusu zaman aşımına (100s) uğradı. Lütfen "Hızlı Dağıtım" modunu seçin veya süreyi azaltın.'
+                    : `Sunucu HTTP ${response.status} hatası döndürdü. Lütfen tekrar deneyin.`
+                ]
+              },
+              isGenerating: false
+            });
+            return;
+          }
+
           const data = await response.json();
 
           if (data.status === 'ok') {
