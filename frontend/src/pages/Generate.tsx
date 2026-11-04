@@ -250,7 +250,7 @@ export default function Generate() {
                 onChange={(e) => {
                   const val = e.target.value;
                   if (val === 'first') {
-                    setHardPrefs({ stopAtFirstSolution: true, solverTimeout: 30 });
+                    setHardPrefs({ stopAtFirstSolution: true, solverTimeout: 85 });
                   } else {
                     setHardPrefs({ stopAtFirstSolution: false, solverTimeout: Number(val) });
                   }

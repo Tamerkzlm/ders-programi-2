@@ -1138,7 +1138,11 @@ def solve(request: SolveRequest):
         days = list(request.settings.days)
         P = int(request.settings.periodsPerDay)
         o = read_options(request)
+        is_render = os.environ.get("RENDER") == "true" or os.environ.get("RENDER_SERVICE_ID") is not None
         total_budget = max(5.0, o["timeout"])
+        # Render bulut proxy (100s) zaman aşımını ve bağlantı kopmasını önlemek için bulutta azami 88sn sınırı
+        if is_render and total_budget > 88.0:
+            total_budget = 88.0
         pinned_slots = getattr(request, "pinnedSlots", None) or getattr(request, "pinned_slots", None) or []
         workers = detect_workers()
 
