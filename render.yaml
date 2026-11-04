@@ -12,5 +12,3 @@ services:
         value: 3.11.9
       - key: ALLOWED_ORIGINS
         value: "*"
-      - key: SOLVER_WORKERS
-        value: "4"

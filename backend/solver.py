@@ -272,26 +272,14 @@ def detect_workers():
         n = len(os.sched_getaffinity(0))
     except (AttributeError, OSError):
         n = os.cpu_count() or 1
-    # Linux cgroup v2 CPU kotası (Render, Docker vb.)
-    try:
+    try:  # Linux cgroup v2 CPU kotası (Render, Docker vb.)
         with open("/sys/fs/cgroup/cpu.max") as f:
             quota, period = f.read().split()[:2]
         if quota != "max":
             n = min(n, max(1, int(float(quota) / float(period))))
     except (OSError, ValueError):
         pass
-    # Linux cgroup v1 CPU kotası (Render / Docker legacy)
-    try:
-        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as f_q, open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as f_p:
-            quota_us = float(f_q.read().strip())
-            period_us = float(f_p.read().strip())
-            if quota_us > 0 and period_us > 0:
-                n = min(n, max(1, int(quota_us / period_us)))
-    except (OSError, ValueError):
-        pass
-    # CP-SAT portföy araması (portfolio search) için en az 2 işçi gerekir;
-    # Render 512MB RAM ortamında bile 2-4 işçi yalnızca ~200MB tepe bellek kullanır ve kilitlenmeyi önler.
-    return max(2, min(n, 8))
+    return max(1, min(n, 16))
 
 
 # --------------------------------------------------------------------------
@@ -823,20 +811,14 @@ def run_solver(model, time_limit, workers, patience=None, busy_by_teacher=None, 
     solver = cp_model.CpSolver()
     prm = solver.parameters
     prm.max_time_in_seconds = max(1.0, float(time_limit))
-    prm.num_workers = max(2, workers)
+    prm.num_workers = workers
     prm.log_search_progress = os.environ.get("SOLVER_LOG") == "1"
 
-    # 🚀 CP-SAT Arama Parametreleri Optimizasyonu:
-    # Temel yerleşim (feasibility/SAT) aşamalarında: linearization_level=0 (pure SAT, LP ek yükü ve simplex matrisi yok).
-    # Bu sayede temel yerleşim 50x daha hızlı bulunur (<2s) ve Render 512MB RAM kotası aşılmaz.
-    # LNS / Çok amaçlı optimizasyon aşamasında ise standart LP seviyesi (linearization_level=1) kullanılır.
-    is_feasibility = any(tag in phase_label for tag in ("Temel", "Yerleşim", "Lokal"))
-    if is_feasibility:
-        prm.linearization_level = 0
-        prm.cp_model_probing_level = 1
-    else:
-        prm.linearization_level = 1
-        prm.cp_model_probing_level = 1
+    # 🚀 ADIM 2: CP-SAT LNS & Search Parameters Tuning
+    # Linearization level 2: Boolean kısıtları doğrusallaştırıp LP relaksasyonlarını ve kesme düzlemlerini devreye sokar
+    prm.linearization_level = 2
+    # Probing level 2: Çıkarım grafikleri (implication graphs) ve kök düğüm indirgemeleri için derin tarama
+    prm.cp_model_probing_level = 2
     cb = _Progress(busy_by_teacher=busy_by_teacher, phase_label=phase_label)
     done = threading.Event()
     if patience:
@@ -1207,7 +1189,7 @@ def solve(request: SolveRequest):
             hard_names = ", ".join(f"{ht['name']} (%{ht['density']} yoğunluk)" for ht in top_hardest[:3])
             add_live_feed(f"🎯 Zorluk sırasına göre ilk yerleştirilecek düğümler: {hard_names}", "info")
 
-        phase0_time = remaining() if o["stop_at_first"] else min(25.0, max(5.0, remaining() * 0.30))
+        phase0_time = remaining() if o["stop_at_first"] else min(12.0, max(3.0, remaining() * 0.15))
         solver, st, _ = run_solver(model, phase0_time, workers, busy_by_teacher=busy_by_teacher, phase_label="Temel Yerleşim")
         print(f"[solver] temel (bitişiklik={'sert' if not allow_soft_consec else 'esnek'}, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}): "
               f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
@@ -1215,10 +1197,6 @@ def solve(request: SolveRequest):
         if not ok(st) and (use_consec and not allow_soft_consec) and st in (cp_model.INFEASIBLE, cp_model.UNKNOWN):
             # 💡 DERS 1: Bitişikliği tüm okul için kapatmak yerine lokal esnek (soft) moda geçir!
             allow_soft_consec = True
-            update_live_progress(
-                stageTitle="Aşama 1: Lokal Esnek Yerleşim Aranıyor",
-                stageDesc="Sıkışan öğretmen kısıtları esnetilerek temel yerleşim aranıyor..."
-            )
             add_live_feed(
                 "Sert bitişiklik kısıtlarıyla bazı öğretmenler sıkıştı; kural tüm okulda kapatılmadan yalnızca gereken öğretmende lokal esnetiliyor...",
                 "warn"
@@ -1236,7 +1214,7 @@ def solve(request: SolveRequest):
             # Yıldırım modunda bile lokal esnetme sayısını minimumda tutmak için slack'leri minimize et
             if o["stop_at_first"] and terms["consec_slacks"]:
                 model.Minimize(sum(terms["consec_slacks"]))
-            phase0_retry = remaining() if o["stop_at_first"] else min(25.0, max(6.0, remaining() * 0.35))
+            phase0_retry = remaining() if o["stop_at_first"] else min(15.0, max(4.0, remaining() * 0.25))
             solver, st, _ = run_solver(model, phase0_retry, workers, busy_by_teacher=busy_by_teacher, phase_label="Lokal Esnek Yerleşim")
             model.ClearObjective()
             print(f"[solver] temel deneme 1 (bitişiklik=lokal_esnek, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}): "
@@ -1245,10 +1223,6 @@ def solve(request: SolveRequest):
         if not ok(st) and not allow_soft_float and st in (cp_model.INFEASIBLE, cp_model.UNKNOWN):
             allow_soft_float = True
             allow_soft_consec = True
-            update_live_progress(
-                stageTitle="Aşama 1: Kayan Boş Günler Esnetiliyor",
-                stageDesc="Kayan boş gün kısıtları yumuşatılarak geçerli çözüm aranıyor..."
-            )
             add_live_feed(
                 "Kayan boş gün kısıtları yumuşatılarak yeniden çözüm aranıyor...",
                 "warn"
@@ -1263,7 +1237,7 @@ def solve(request: SolveRequest):
             )
             if o["stop_at_first"] and terms["consec_slacks"]:
                 model.Minimize(sum(terms["consec_slacks"]))
-            phase0_retry2 = remaining() if o["stop_at_first"] else min(25.0, max(6.0, remaining() * 0.35))
+            phase0_retry2 = remaining() if o["stop_at_first"] else min(15.0, max(4.0, remaining() * 0.25))
             solver, st, _ = run_solver(model, phase0_retry2, workers, busy_by_teacher=busy_by_teacher, phase_label="Esnek Yerleşim")
             model.ClearObjective()
             print(f"[solver] temel deneme 2 (bitişiklik=lokal_esnek, sert_kayan=kapalı): "
