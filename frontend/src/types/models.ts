@@ -164,6 +164,7 @@ export interface LiveMetrics {
   relaxedRules?: RelaxedRule[];
   relaxedRulesCount?: number;
   warnings?: string[];
+  stoppedEarlyByUser?: boolean;
   [key: string]: any;
 }
 

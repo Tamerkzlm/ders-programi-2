@@ -72,8 +72,17 @@ _live_progress = {
     "feed": [],
 }
 
+# 🛑 Erken Sonlandırma (Kullanıcı İsteğiyle Durdurup Son Çözümü Koruma) Durumu
+_stop_event = threading.Event()
+_current_solver_lock = threading.Lock()
+_current_solver = None
+
 
 def reset_live_progress():
+    global _current_solver
+    _stop_event.clear()
+    with _current_solver_lock:
+        _current_solver = None
     with _progress_lock:
         _live_progress.update({
             "active": True,
@@ -92,6 +101,49 @@ def reset_live_progress():
             "hardestTeachers": [],
             "feed": [],
         })
+
+
+def request_stop_solver() -> bool:
+    """Kullanıcının devam eden optimizasyonu sonlandırıp son geçerli çözümü almasını sağlar."""
+    with _progress_lock:
+        is_active = _live_progress.get("active", False)
+        sols = _live_progress.get("solutionsFound", 0)
+        gaps = _live_progress.get("currentGaps")
+
+    _stop_event.set()
+
+    with _current_solver_lock:
+        active_s = _current_solver
+        if active_s is not None:
+            try:
+                if hasattr(active_s, "stop_search"):
+                    active_s.stop_search()
+                elif hasattr(active_s, "StopSearch"):
+                    active_s.StopSearch()
+            except Exception as e:
+                print(f"[solver] stop_search istisnası: {e}", flush=True)
+
+    if is_active:
+        if sols > 0:
+            add_live_feed(
+                f"⏹️ Kullanıcı motoru sonlandırdı. Şimdiye kadarki en iyi çözüm (#{sols}, {gaps if gaps is not None else 'geçerli'} saat pencere) mühürleniyor...",
+                "warn"
+            )
+            update_live_progress(
+                stageTitle="Motor Sonlandırılıyor: En İyi Çözüm Mühürleniyor...",
+                stageDesc="Kullanıcı isteğiyle arama durduruldu; son geçerli ders programı alınıyor."
+            )
+        else:
+            add_live_feed(
+                "⏹️ Kullanıcı arama sürecini ilk geçerli çözüm bulunmadan önce iptal etti.",
+                "warn"
+            )
+            update_live_progress(
+                stageTitle="Arama İptal Edildi",
+                stageDesc="Kullanıcı isteğiyle arama durduruldu."
+            )
+        return True
+    return False
 
 
 def update_live_progress(**kwargs):
@@ -762,6 +814,13 @@ class _Progress(cp_model.CpSolverSolutionCallback):
         return total_gaps
 
     def on_solution_callback(self):
+        if _stop_event.is_set():
+            try:
+                self.StopSearch()
+            except Exception:
+                pass
+            return
+
         now = time.time()
         self.solutions += 1
         try:
@@ -813,6 +872,10 @@ class _Progress(cp_model.CpSolverSolutionCallback):
 
 
 def run_solver(model, time_limit, workers, patience=None, busy_by_teacher=None, phase_label="Optimizasyon"):
+    global _current_solver
+    if _stop_event.is_set():
+        return None, cp_model.UNKNOWN, None
+
     solver = cp_model.CpSolver()
     prm = solver.parameters
     prm.max_time_in_seconds = max(1.0, float(time_limit))
@@ -834,17 +897,39 @@ def run_solver(model, time_limit, workers, patience=None, busy_by_teacher=None, 
         prm.cp_model_probing_level = 1
     cb = _Progress(busy_by_teacher=busy_by_teacher, phase_label=phase_label)
     done = threading.Event()
-    if patience:
-        def watch():
-            while not done.wait(0.5):
-                if cb.best is not None and time.time() - cb.last_improve > patience:
-                    solver.stop_search()
-                    return
-        threading.Thread(target=watch, daemon=True).start()
+
+    with _current_solver_lock:
+        _current_solver = solver
+
+    def watch():
+        while not done.wait(0.2):
+            if _stop_event.is_set():
+                try:
+                    if hasattr(solver, "stop_search"):
+                        solver.stop_search()
+                    elif hasattr(solver, "StopSearch"):
+                        solver.StopSearch()
+                except Exception:
+                    pass
+                return
+            if patience and cb.best is not None and time.time() - cb.last_improve > patience:
+                try:
+                    if hasattr(solver, "stop_search"):
+                        solver.stop_search()
+                    elif hasattr(solver, "StopSearch"):
+                        solver.StopSearch()
+                except Exception:
+                    pass
+                return
+
+    threading.Thread(target=watch, daemon=True).start()
     try:
         status = solver.Solve(model, cb)
     finally:
         done.set()
+        with _current_solver_lock:
+            if _current_solver is solver:
+                _current_solver = None
     return solver, status, cb
 
 
@@ -1289,7 +1374,20 @@ def solve(request: SolveRequest):
                   f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
 
         if not ok(st):
-            last_status = solver.StatusName(st)
+            if _stop_event.is_set():
+                msg = "Arama Kullanıcı Tarafından İptal Edildi."
+                add_live_feed("⏹️ Motor henüz ilk geçerli çözümü bulamadan kullanıcı tarafından durduruldu.", "warn")
+                update_live_progress(active=False, stageTitle="Arama İptal Edildi")
+                return {
+                    "status": "error",
+                    "message": msg,
+                    "detail": "İlk geçerli çözüm aranırken işlem kullanıcı isteğiyle durduruldu.",
+                    "metrics": {
+                        "stoppedEarlyByUser": True,
+                        "warnings": ["İlk geçerli çözüm bulunmadan önce arama kullanıcı tarafından durduruldu. Dilediğiniz zaman yeniden dağıtım başlatabilirsiniz."]
+                    }
+                }
+            last_status = solver.StatusName(st) if solver else "UNKNOWN"
             diag_issues = diagnose_infeasibility(teachers, classrooms, activities, days, P, profiles, pinned_slots=pinned_slots)
             if st == cp_model.INFEASIBLE:
                 msg = "ÇÖZÜM YOK: Belirlenen kısıtlar ve kapalı saatler birbiriyle çelişiyor."
@@ -1317,6 +1415,10 @@ def solve(request: SolveRequest):
             print(f"[solver] 'İlk geçerli çözümde dur' devrede. İyileştirme kademeleri atlandı. Geçen süre: {time.time() - start:.2f}s", flush=True)
             stage = "ilk_gecerli"
             add_live_feed("⚡ Yıldırım Modu: İlk geçerli çözüm kabul edildi, tablo hazırlanıyor.", "success")
+        elif _stop_event.is_set():
+            stage = "kullanici_durdurdu"
+            print(f"[solver] Kullanıcı durdurma talebi devrede. Aşama 2 atlandı. Temel çözüm kabul edildi.", flush=True)
+            add_live_feed("⏹️ Kullanıcı durdurma komutu: Aşama 2 atlandı, temel geçerli çözüm alınıyor.", "warn")
         else:
             # 🚀 ADIM 1: Tek Geçişli Ağırlıklandırılmış Çok Amaçlı LNS Optimizasyonu
             lns_budget = min(total_budget, max(25.0, raw_timeout)) - (time.time() - start)
@@ -1350,9 +1452,9 @@ def solve(request: SolveRequest):
                         busy_by_teacher=busy_by_teacher,
                         phase_label="LNS İyileştirme"
                     )
-                    if ok(opt_st):
+                    if opt_solver is not None and ok(opt_st):
                         best_solver = opt_solver
-                        stage = "iyileştirilmiş"
+                        stage = "kullanici_durdurdu" if _stop_event.is_set() else "iyileştirilmiş"
                         final_val = int(round(opt_solver.ObjectiveValue()))
                         print(f"[solver] çok amaçlı LNS optimizasyonu tamamlandı: {opt_solver.StatusName(opt_st)} "
                               f"{opt_solver.WallTime():.1f}s değer={final_val}", flush=True)
@@ -1363,8 +1465,8 @@ def solve(request: SolveRequest):
                             "seconds": round(opt_solver.WallTime(), 1)
                         })
                     else:
-                        print(f"[solver] optimizasyonda yeni çözüm bulunamadı, temel çözüm korundu: "
-                              f"{opt_solver.StatusName(opt_st)}", flush=True)
+                        print(f"[solver] optimizasyonda yeni çözüm bulunamadı veya durduruldu, temel çözüm korundu: "
+                              f"{opt_solver.StatusName(opt_st) if opt_solver else 'YOK'}", flush=True)
                     model.ClearObjective()
 
         update_live_progress(
@@ -1377,10 +1479,17 @@ def solve(request: SolveRequest):
             busy, teachers, profiles, days, o,
             timetable=timetable, classrooms=classrooms
         )
-        add_live_feed(
-            f"✓ Dağıtım tamamlandı! Sonuç toplam pencere: {total_gaps} saat, esnetilen kural sayısı: {len(relaxed_rules)}.",
-            "success"
-        )
+        stopped_early = _stop_event.is_set()
+        if stopped_early:
+            add_live_feed(
+                f"✓ Motor kullanıcı isteğiyle sonlandırıldı! Son geçerli çözüm ({total_gaps} saat pencere) mühürlendi.",
+                "success"
+            )
+        else:
+            add_live_feed(
+                f"✓ Dağıtım tamamlandı! Sonuç toplam pencere: {total_gaps} saat, esnetilen kural sayısı: {len(relaxed_rules)}.",
+                "success"
+            )
         update_live_progress(active=False, currentGaps=total_gaps)
 
         # Adalet Skalası: Haftalık pencere (boşluk) sayısı 3 ve üzeri olan öğretmenler üzerinden değerlendirilir
@@ -1478,6 +1587,8 @@ def solve(request: SolveRequest):
                 fairness_color = "red"
 
         violations = list(notes) + warnings_extra + build_warn
+        if stopped_early:
+            violations.insert(0, f"ℹ️ Optimizasyon kullanıcı tarafından sonlandırıldı: En son bulunan geçerli çözüm ({total_gaps} saat pencere) korundu ve mühürlendi.")
         if rule_msgs:
             violations.append(f"Kural ihlali kalan {len(rule_msgs)} durum (süre/sıkışıklık nedeniyle gevşetildi):")
             violations.extend(rule_msgs[:30])
@@ -1671,6 +1782,7 @@ def solve(request: SolveRequest):
                 "stage": stage,
                 "stageDetails": stage_details,
                 "workers": workers,
+                "stoppedEarlyByUser": stopped_early,
             },
         }
     except Exception as e:

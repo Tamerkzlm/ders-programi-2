@@ -10,14 +10,22 @@ import {
   Server,
   TrendingDown,
   Users,
-  Terminal
+  Terminal,
+  Square,
+  Loader2
 } from 'lucide-react';
 
-import { getActiveApiUrl } from '../../store/appStore';
+import { getActiveApiUrl, useAppStore } from '../../store/appStore';
 
 export default function TelemetryModal({ solverTimeout = 300, isGenerating = false, stopAtFirstSolution = false }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [liveData, setLiveData] = useState(null);
+  const { isStopping, stopGeneration } = useAppStore();
+
+  const handleStop = async () => {
+    if (isStopping) return;
+    await stopGeneration();
+  };
 
   useEffect(() => {
     if (!isGenerating) {
@@ -119,22 +127,68 @@ export default function TelemetryModal({ solverTimeout = 300, isGenerating = fal
           </div>
         </div>
 
-        {/* Canlı Kronometre Kartı */}
-        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/80 px-4 py-2.5 rounded-xl shrink-0">
-          <div className="p-1.5 bg-indigo-600 text-white rounded-lg">
-            <Clock size={16} />
-          </div>
-          <div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Geçen Süre
-            </span>
-            <span className="text-lg font-mono font-black text-slate-900 leading-none">
-              {formatTime(elapsedSeconds)}
-              <span className="text-xs text-slate-400 font-normal ml-1">
-                {stopAtFirstSolution ? '/ Hızlı (1-5s)' : `/ ${formatTime(solverTimeout)}`}
+        {/* Canlı Kronometre Kartı & Durdur Butonu */}
+        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
+          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/80 px-4 py-2.5 rounded-xl shrink-0">
+            <div className="p-1.5 bg-indigo-600 text-white rounded-lg">
+              <Clock size={16} />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Geçen Süre
               </span>
-            </span>
+              <span className="text-lg font-mono font-black text-slate-900 leading-none">
+                {formatTime(elapsedSeconds)}
+                <span className="text-xs text-slate-400 font-normal ml-1">
+                  {stopAtFirstSolution ? '/ Hızlı (1-5s)' : `/ ${formatTime(solverTimeout)}`}
+                </span>
+              </span>
+            </div>
           </div>
+
+          {/* 🛑 MOTORU SONLANDIR / SON ÇÖZÜMÜ KORU BUTONU */}
+          <button
+            type="button"
+            onClick={handleStop}
+            disabled={isStopping}
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer ${
+              isStopping
+                ? 'bg-amber-100 text-amber-900 border border-amber-300 opacity-80 cursor-wait'
+                : solutionsFound > 0
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 active:scale-95 shadow-amber-500/20'
+                  : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 active:scale-95'
+            }`}
+            title={
+              solutionsFound > 0
+                ? 'Sürenin bitmesini beklemeden şimdiye kadar bulunan en kaliteli çözümü onaylar ve dağıtımı sonlandırır.'
+                : 'Dağıtımı iptal eder.'
+            }
+          >
+            {isStopping ? (
+              <>
+                <Loader2 size={15} className="animate-spin text-amber-800" />
+                <span className="text-left leading-tight">
+                  <span className="font-bold block">Son Çözüm Alınıyor...</span>
+                  <span className="text-[9px] block text-amber-700">Motor durduruluyor</span>
+                </span>
+              </>
+            ) : solutionsFound > 0 ? (
+              <>
+                <CheckCircle2 size={16} className="text-white shrink-0" />
+                <div className="text-left leading-tight">
+                  <span className="font-black block">Son Çözümü Al & Bitir</span>
+                  <span className="text-[10px] block text-amber-100 font-medium">
+                    {currentGaps !== null ? `${currentGaps} Sa Pencere (#${solutionsFound})` : `#${solutionsFound}. Çözümü Al`}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <Square size={13} className="text-rose-600" />
+                <span>Aramayı Durdur</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
@@ -205,6 +259,47 @@ export default function TelemetryModal({ solverTimeout = 300, isGenerating = fal
           </div>
         </div>
       </div>
+
+      {/* 💡 EN İYİ ÇÖZÜMLE ERKEN BİTİRME TAVSİYE BARI */}
+      {solutionsFound > 0 && !stopAtFirstSolution && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/90 rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-2xs">
+          <div className="flex items-start gap-2.5">
+            <div className="p-1.5 rounded-lg bg-amber-500 text-white shrink-0 mt-0.5">
+              <Sparkles size={14} />
+            </div>
+            <div>
+              <div className="font-black text-amber-950 flex items-center gap-1.5">
+                <span>Geçerli Çözüm Hazır: #{solutionsFound}. Çözüm ({currentGaps ?? 0} Saat Boşluk)</span>
+                <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black px-1.5 py-0.2 rounded border border-emerald-300">
+                  Kullanıma Hazır ✓
+                </span>
+              </div>
+              <p className="text-amber-800 text-[11px] leading-relaxed mt-0.5">
+                Canlı log akışından uzun süredir yeni bir ilerleme gelmediğini fark ettiyseniz, kalan süreyi beklemeden motoru durdurabilir; şimdiye kadarki en iyi programı doğrudan kaydedebilirsiniz.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleStop}
+            disabled={isStopping}
+            className="shrink-0 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all active:scale-95"
+          >
+            {isStopping ? (
+              <>
+                <Loader2 size={13} className="animate-spin" />
+                <span>Sonuç Çıkarılıyor...</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={13} />
+                <span>Bu Çözümle Sonlandır</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* 📊 AŞAMA VE İTERASYON KARTLARI */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">

@@ -17,7 +17,9 @@ import {
   CalendarDays,
   CheckCircle2,
   Waves,
-  X
+  X,
+  Square,
+  Loader2
 } from 'lucide-react';
 import TelemetryModal from '../components/telemetry/TelemetryModal';
 import PrePinPanel from '../components/PrePinPanel';
@@ -30,7 +32,9 @@ export default function Generate() {
     generateResult, 
     setGenerateResult, 
     isGenerating, 
+    isStopping,
     startGeneration,
+    stopGeneration,
     pinnedSlots,
     recalculateMetrics,
     timetable,
@@ -116,9 +120,34 @@ export default function Generate() {
           )}
 
           {isGenerating && (
-            <div className="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3.5 py-1.5 rounded-xl border border-indigo-200 text-xs font-bold animate-pulse">
-              <Cpu size={15} className="animate-spin" />
-              <span>Motor Çalışıyor...</span>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3.5 py-1.5 rounded-xl border border-indigo-200 text-xs font-bold animate-pulse">
+                <Cpu size={15} className="animate-spin" />
+                <span>Motor Çalışıyor...</span>
+              </div>
+              <button
+                type="button"
+                onClick={stopGeneration}
+                disabled={isStopping}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer ${
+                  isStopping
+                    ? 'bg-amber-100 text-amber-900 border border-amber-300 opacity-80 cursor-wait'
+                    : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 active:scale-95'
+                }`}
+                title="Sürenin bitmesini beklemeden son geçerli çözümü al ve bitir"
+              >
+                {isStopping ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin text-amber-700" />
+                    <span>Durduruluyor...</span>
+                  </>
+                ) : (
+                  <>
+                    <Square size={12} className="text-amber-700 fill-amber-700" />
+                    <span>Son Çözümü Al & Bitir</span>
+                  </>
+                )}
+              </button>
             </div>
           )}
         </div>
@@ -264,7 +293,7 @@ export default function Generate() {
               <p className="text-[10px] text-slate-500 leading-relaxed">
                 {hardPrefs?.stopAtFirstSolution
                   ? '⚡ Yıldırım Modu: Kural ihlalsiz ilk geçerli çakışmasız program bulunduğu milisaniyede aramayı durdurur ve anında ekrana basar (1-3 saniye).'
-                  : 'Kısıtları yoğun okullarda 300 saniye (5 dk), pencereleri en aza indiren en adil dağılımı sağlar.'}
+                  : 'Kısıtları yoğun okullarda 300 saniye (5 dk) veya 900 saniye (15 dk), pencereleri en aza indiren en adil dağılımı sağlar. Canlı log takibinde yeterli verim aldığınızı gördüğünüz an sürenin bitmesini beklemeden "Son Çözümü Al & Bitir" butonuyla motoru erken sonlandırabilirsiniz.'}
               </p>
             </div>
 
@@ -311,6 +340,24 @@ export default function Generate() {
         {/* BAŞARILI SONUÇ EKRANI */}
         {!isGenerating && generateResult && generateResult.success && (
           <div className="space-y-4 w-full">
+            {generateResult.metrics?.stoppedEarlyByUser && (
+              <div className="bg-amber-50/90 border border-amber-200/90 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-950 shadow-2xs animate-in fade-in duration-300">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-amber-500 text-white shrink-0 shadow-xs">
+                    <CheckCircle2 size={18} />
+                  </div>
+                  <div>
+                    <span className="font-black text-sm block text-amber-950">Motor Kullanıcı İsteğiyle Erken Sonlandırıldı</span>
+                    <span className="text-[11px] text-amber-800 font-medium block mt-0.5">
+                      Belirlenen sürenin dolması beklenmeden, canlı takipte ulaşılan en kaliteli çözüm ({metrics?.totalSchoolGaps ?? 0} saat okul penceresi) başarıyla mühürlendi ve uygulandı.
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-amber-200/70 text-amber-900 border border-amber-300 shrink-0">
+                  Erken Sonlandırma Aktif
+                </span>
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 text-center">
               <div className="bg-slate-50 p-2.5 rounded-xl font-bold border border-slate-100 flex flex-col justify-between">
                 <div className="text-[10px] text-slate-400">HESAPLANAN SÜRE</div>

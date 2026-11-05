@@ -814,10 +814,12 @@ export interface AppState {
   clearAllPins: () => void;
   setPinnedSlots: (slots: PinnedSlot[]) => void;
   isGenerating: boolean;
+  isStopping: boolean;
   generateResult: GenerateResult | null;
   liveTelemetry?: any;
   setGenerateResult: (result: GenerateResult | null) => void;
   startGeneration: () => Promise<void>;
+  stopGeneration: () => Promise<void>;
   saveCurrentSchoolSnapshot: () => void;
   downloadSchoolBackup: () => void;
   loadHzAyseDemoData: () => void;
@@ -1044,10 +1046,25 @@ export const useAppStore = create<AppState>()(
       
 
       isGenerating: false,
+      isStopping: false,
       generateResult: null,
       setGenerateResult: (result) => set({ generateResult: result }),
 
-      
+      stopGeneration: async () => {
+        const { isGenerating, isStopping } = get();
+        if (!isGenerating || isStopping) return;
+
+        set({ isStopping: true });
+        try {
+          const targetApiUrl = getActiveApiUrl() || await resolveSolverApiUrl();
+          await fetch(`${targetApiUrl}/solve/stop`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+        } catch (err) {
+          console.error('Stop request failed:', err);
+        }
+      },
 
       startGeneration: async () => {
         const { settings, teachers, classrooms, softPrefs, hardPrefs, pinnedSlots } = get();
@@ -1064,7 +1081,7 @@ export const useAppStore = create<AppState>()(
           return;
         }
 
-        set({ isGenerating: true, generateResult: null });
+        set({ isGenerating: true, isStopping: false, generateResult: null });
 
         try {
           const targetApiUrl = await resolveSolverApiUrl();
@@ -1100,7 +1117,8 @@ export const useAppStore = create<AppState>()(
                     : `Sunucu HTTP ${response.status} hatası döndürdü. Lütfen tekrar deneyin.`
                 ]
               },
-              isGenerating: false
+              isGenerating: false,
+              isStopping: false
             });
             return;
           }
@@ -1108,15 +1126,20 @@ export const useAppStore = create<AppState>()(
           const data = await response.json();
 
           if (data.status === 'ok') {
+            const wasStopped = Boolean(data.metrics?.stoppedEarlyByUser);
             set({
               timetable: data.timetable,
               generateResult: {
                 success: true,
+                message: wasStopped
+                  ? `Motor kullanıcı isteğiyle sonlandırıldı. Ulaşılan son geçerli çözüm (${data.metrics?.totalSchoolGaps ?? 0} Saat Boşluk) başarıyla korundu ve uygulandı.`
+                  : undefined,
                 metrics: data.metrics,
                 unassignedCount: data.metrics?.unassigned || 0,
                 warnings: data.metrics?.violations || []
               },
-              isGenerating: false
+              isGenerating: false,
+              isStopping: false
             });
           } else {
             const errorMsg = data.detail || data.message || 'Dağıtım Yapılamadı!';
@@ -1130,10 +1153,11 @@ export const useAppStore = create<AppState>()(
                 unassignedCount: 0,
                 warnings: errorWarnings
               },
-              isGenerating: false
+              isGenerating: false,
+              isStopping: false
             });
           }
-        } catch (err) {
+        } catch (err: any) {
           set({
             generateResult: {
               success: false,
@@ -1144,7 +1168,8 @@ export const useAppStore = create<AppState>()(
                 err?.message || 'Terminalden Python sunucusunun (FastAPI) çalıştığından emin olun.'
               ]
             },
-            isGenerating: false
+            isGenerating: false,
+            isStopping: false
           });
         }
       },

@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from models import SolveRequest
-from solver import solve, get_live_progress, detect_workers
+from solver import solve, get_live_progress, detect_workers, request_stop_solver
 from validators import pre_flight_check
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
@@ -94,6 +94,19 @@ def health_check():
 def solve_progress():
     """Çözüm esnasında anlık ilerleme, bulunan çözüm sayısı ve pencere düşüşünü döndürür."""
     return get_live_progress()
+
+@app.api_route("/solve/stop", methods=["GET", "POST"])
+def stop_solving():
+    """
+    Kullanıcının devam eden optimizasyonu sonlandırıp son geçerli çözümü almasını sağlar.
+    15 dakikalık motor çalışırken yeni iyileştirme gelmediğinde erken bitirme imkanı sunar.
+    """
+    stopped = request_stop_solver()
+    return {
+        "status": "ok",
+        "stopped": stopped,
+        "message": "Durdurma sinyali çözücü motoruna iletildi. Son geçerli çözüm mühürleniyor."
+    }
 
 @app.post("/solve") # response_model kaldırıldı, hata vermesi engellendi
 async def solve_timetable(request: SolveRequest):
