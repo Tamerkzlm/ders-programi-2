@@ -69,7 +69,7 @@ export const REAL_TEACHERS: Teacher[] = [
   { id: "t28", name: "BÜŞRA AKSOY ÖZTÜRK", branch: "IHL", unavailable: { "Salı": [5, 6, 7, 8], "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8], "Cuma": [5, 6, 7, 8] }, isExempt: false },
   { id: "t29", name: "MEHMET ALKAN", branch: "IHL", unavailable: {}, isExempt: false },
   { id: "t30", name: "AYŞE NUR GÜLER", branch: "GSBD", unavailable: { "Pazartesi": [7, 8], "Salı": [7, 8], "Çarşamba": [7, 8], "Perşembe": [7, 8], "Cuma": [7, 8] }, isExempt: false },
-  { id: "t31", name: "MUSTAFA BAYAR", branch: "COG", unavailable: {}, isExempt: true }, // 6 Saat - Part-time / Muaf
+  { id: "t31", name: "MUSTAFA BAYAR", branch: "COG", unavailable: {}, isExempt: true, isAdministrator: true }, // 6 Saat - İdareci / Muaf
   { id: "t32", name: "DILAY ALTINÖZ", branch: "TAR", unavailable: { "Çarşamba": [1, 2, 3, 4, 5, 6, 7, 8] }, isExempt: false },
   { id: "t33", name: "IRMAK KÜÇÜKBAŞ YARAR", branch: "TDEB", unavailable: { "Çarşamba": [5, 6, 7, 8] }, isExempt: false },
   { id: "t34", name: "MUSTAFA BULUT", branch: "IHL", unavailable: {}, isExempt: false },

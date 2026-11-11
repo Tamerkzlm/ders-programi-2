@@ -211,9 +211,50 @@ def pin_field(pin, key):
 def read_options(request):
     sc = getattr(request, "softConstraints", None)
     hc = getattr(request, "hardConstraints", None)
+    
+    max_total_level = get_val(hc, "maxTotalGapsLevel", None) or get_val(sc, "maxTotalGapsLevel", None) or get_val(hc, "maxGapsLevel", "medium")
+    max_total_penalty = int(get_val(hc, "maxTotalGapsPenalty", None) or get_val(sc, "maxTotalGapsPenalty", None) or get_val(hc, "maxGapsPenalty", 60))
+    max_total_gaps = int(get_val(hc, "maxTotalGaps", None) or (int(get_val(hc, "maxGapsPerDay", 2)) * 2 if get_val(hc, "maxGapsPerDay", None) is not None else 4))
+    enforce_max_total_gaps = bool(get_val(hc, "enforceMaxTotalGaps", True)) and max_total_level != "off"
+    
+    min_total_gaps = int(get_val(hc, "minTotalGaps", None) or get_val(hc, "minGapsPerDay", 0))
+    min_total_level = get_val(hc, "minTotalGapsLevel", None) or get_val(sc, "minTotalGapsLevel", None) or get_val(hc, "minGapsLevel", "off")
+    min_total_penalty = int(get_val(hc, "minTotalGapsPenalty", None) or get_val(sc, "minTotalGapsPenalty", None) or get_val(hc, "minGapsPenalty", 60))
+    enforce_min_total_gaps = min_total_level != "off" and min_total_gaps > 0
+    gap_exempt_ids = set(get_val(hc, "gapExemptTeacherIds", None) or get_val(sc, "gapExemptTeacherIds", None) or [])
+
+    min_hourly_reserve = int(get_val(hc, "minHourlyReserveTeachers", 1) or 0)
+    hourly_reserve_level = get_val(hc, "hourlyReserveLevel", None) or get_val(sc, "hourlyReserveLevel", "off")
+    hourly_reserve_penalty = int(get_val(hc, "hourlyReservePenalty", None) or get_val(sc, "hourlyReservePenalty", 60))
+    enforce_hourly_reserve = bool(get_val(hc, "enforceHourlyReserve", False)) and hourly_reserve_level != "off" and min_hourly_reserve > 0
+    enforce_categorical_fairness = bool(get_val(hc, "enforceCategoricalFairness", True))
+
+    min_active_days = int(get_val(hc, "minActiveDays", 4) or 0)
+    min_active_days_level = get_val(hc, "minActiveDaysLevel", None) or get_val(sc, "minActiveDaysLevel", "high")
+    min_active_days_penalty = int(get_val(hc, "minActiveDaysPenalty", None) or get_val(sc, "minActiveDaysPenalty", 100))
+    enforce_min_active_days = bool(get_val(hc, "enforceMinActiveDays", True)) and min_active_days_level != "off" and min_active_days > 0
+    min_days_exempt_ids = set(get_val(hc, "minDaysExemptTeacherIds", None) or get_val(sc, "minDaysExemptTeacherIds", None) or [])
+
     o = {
-        "enforce_max_gaps": bool(get_val(hc, "enforceMaxGaps", True)),
-        "max_gaps_per_day": int(get_val(hc, "maxGapsPerDay", 2)),
+        "enforce_max_total_gaps": enforce_max_total_gaps,
+        "max_total_gaps": max_total_gaps,
+        "max_total_gaps_level": max_total_level,
+        "max_total_gaps_penalty": max_total_penalty,
+        "enforce_min_total_gaps": enforce_min_total_gaps,
+        "min_total_gaps": min_total_gaps,
+        "min_total_gaps_level": min_total_level,
+        "min_total_gaps_penalty": min_total_penalty,
+        "gap_exempt_ids": gap_exempt_ids,
+        "enforce_hourly_reserve": enforce_hourly_reserve,
+        "min_hourly_reserve": min_hourly_reserve,
+        "hourly_reserve_level": hourly_reserve_level,
+        "hourly_reserve_penalty": hourly_reserve_penalty,
+        "enforce_categorical_fairness": enforce_categorical_fairness,
+        "enforce_min_active_days": enforce_min_active_days,
+        "min_active_days": min_active_days,
+        "min_active_days_level": min_active_days_level,
+        "min_active_days_penalty": min_active_days_penalty,
+        "min_days_exempt_ids": min_days_exempt_ids,
         "enforce_daily_balance": bool(get_val(hc, "enforceDailyBalance", True)),
         "min_daily_hours": int(get_val(hc, "minDailyHours", 3)),
         "enforce_consecutive": bool(get_val(hc, "enforceConsecutiveClassRules", True)),
@@ -277,10 +318,23 @@ def teacher_profiles(teachers, activities, days, P, o):
         is_admin = bool(get_val(t, "isAdministrator", False))
         exempt = explicit_exempt or weekly <= 8 or is_part_time or is_admin
 
-        # Öncelikli tam doldurulacak gün ve son saatler tercihi
-        priority_full_day = get_val(t, "priorityFullDay", None)
-        if priority_full_day and priority_full_day not in days:
-            priority_full_day = None
+        # Öncelikli tam doldurulacak günler (1, 2 veya daha fazla gün) ve son saatler tercihi
+        raw_p_days = get_val(t, "priorityFullDays", None)
+        raw_p_day = get_val(t, "priorityFullDay", None)
+        p_days_candidates = []
+        if isinstance(raw_p_days, (list, tuple, set)):
+            p_days_candidates.extend(str(x).strip() for x in raw_p_days if x)
+        if isinstance(raw_p_day, (list, tuple, set)):
+            p_days_candidates.extend(str(x).strip() for x in raw_p_day if x)
+        elif isinstance(raw_p_day, str) and raw_p_day.strip():
+            for part in raw_p_day.split(","):
+                if part.strip():
+                    p_days_candidates.append(part.strip())
+        priority_full_days = []
+        for pd in p_days_candidates:
+            if pd in days and pd not in priority_full_days:
+                priority_full_days.append(pd)
+        priority_full_day = priority_full_days[0] if priority_full_days else None
         fill_late_hours = bool(get_val(t, "fillLateHours", False))
 
         # 🌊 ESNEK / KAYAN TERCİHLER ("Boş günüm ya da saatim fark etmez" diyen öğretmenler)
@@ -296,6 +350,37 @@ def teacher_profiles(teachers, activities, days, P, o):
             hard_cap += 1
 
         rule_cap = hard_cap
+        open_slots = sum(open_cnt[d] for d in days)
+        free_slots = max(0, open_slots - weekly)
+
+        if free_slots <= 2:
+            cat_id = "cat1_tight"
+            cat_label = "1. Dar Marj (0-2 Boş Slot)"
+            cat_min_gaps, cat_max_gaps = 0, min(1, free_slots)
+        elif weekly < 25 and 3 <= free_slots <= 5:
+            cat_id = "cat2_limited"
+            cat_label = "2. Sınırlı Marj (3-5 Boş Slot)"
+            cat_min_gaps, cat_max_gaps = 1, 2
+        elif weekly >= 25 and 3 <= free_slots <= 5:
+            cat_id = "cat3a_heavy_lim"
+            cat_label = "3A. Ağır Yük & Sınırlı Marj (25+ Ders, 3-5 Boş)"
+            cat_min_gaps, cat_max_gaps = 1, 2
+        elif weekly >= 25 and free_slots >= 6:
+            cat_id = "cat3b_heavy_wide"
+            cat_label = "3B. Ağır Yük & Geniş Marj (25+ Ders, 6+ Boş)"
+            cat_min_gaps, cat_max_gaps = 1, 3
+        else:
+            cat_id = "cat4_wide"
+            cat_label = "4. Geniş Marj / İyi Niyet Korumalı (6+ Boş Slot)"
+            cat_min_gaps, cat_max_gaps = 1, 3
+
+        # 🌟 Asgari Pencere Kuralı ile Kategorik Üst Sınır Uyumu:
+        # Eğer kullanıcı "En az X saat boşluk ver" dediyse ve öğretmenin kapasitesi yetiyorsa,
+        # kategorik adalet üst sınırı bu asgari değerin altına düşemez (kural çelişkisi önlenir).
+        if o.get("enforce_min_total_gaps") and o.get("min_total_gaps", 0) > 0:
+            req_min = o.get("min_total_gaps", 0)
+            if free_slots >= req_min:
+                cat_max_gaps = max(cat_max_gaps, req_min)
 
         profiles[t.id] = {
             "weekly": weekly, "exempt": exempt, "closed": closed,
@@ -304,7 +389,14 @@ def teacher_profiles(teachers, activities, days, P, o):
             "is_admin": is_admin,
             "num_avail_days": num_avail_days,
             "open_days": open_days,
+            "open_slots": open_slots,
+            "free_slots": free_slots,
+            "cat_id": cat_id,
+            "cat_label": cat_label,
+            "cat_min_gaps": cat_min_gaps,
+            "cat_max_gaps": cat_max_gaps,
             "priority_full_day": priority_full_day,
+            "priority_full_days": priority_full_days,
             "fill_late_hours": fill_late_hours,
             "free_day_pref": free_day_pref,
             "free_half_pref": free_half_pref,
@@ -342,7 +434,7 @@ def detect_workers():
 # --------------------------------------------------------------------------
 # Model
 # --------------------------------------------------------------------------
-def build_model(use_consecutive, activities, classrooms, teachers, days, P, profiles, o, pinned_slots=None, allow_soft_floating=False, lunch_after=None, allow_soft_consecutive=False):
+def build_model(use_consecutive, activities, classrooms, teachers, days, P, profiles, o, pinned_slots=None, allow_soft_floating=False, lunch_after=None, allow_soft_consecutive=False, allow_soft_gaps=False):
     """
     Tek model kurar. Dönüş: (model, x, terms, warnings, busy_by_teacher)
       x[a_id, gün, saat]  : aktivitenin o gün o saatte BAŞLAMASI
@@ -350,7 +442,7 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
     """
     model = cp_model.CpModel()
     num_days = len(days)
-    terms = {"rules": [], "gaps": [], "prefs": [], "consec_slacks": []}
+    terms = {"rules": [], "gaps": [], "prefs": [], "consec_slacks": [], "min_gap_slacks": [], "reserve_slacks": []}
     warnings = []
     busy_by_teacher = {}
 
@@ -481,13 +573,28 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
                         terms["prefs"].append(o["stem_late_penalty"] * x[a["id"], d, p])
 
     # ---- Öğretmen kuralları
+    hourly_reserve_exprs = {(d, p): [] for d in days for p in range(2, P)}
     for t in teachers:
         t_acts = by_teacher.get(t.id, [])
         if not t_acts:
             continue
         prof = profiles[t.id]
         soft_rules = not prof["exempt"]
-        need_gaps = (prof["is_part_time"] or o["minimize_gaps"] or (soft_rules and o["enforce_max_gaps"]))
+        is_gap_exempt = (t.id in o.get("gap_exempt_ids", set()))
+        eligible_for_reserve = (
+            not prof.get("is_admin", False)
+            and not prof["exempt"]
+            and not prof.get("is_part_time", False)
+            and not is_gap_exempt
+            and prof["weekly"] > 0
+        )
+        need_gaps = (
+            prof["is_part_time"]
+            or o["minimize_gaps"]
+            or (soft_rules and (o["enforce_max_total_gaps"] or o["enforce_min_total_gaps"]))
+            or (o.get("enforce_hourly_reserve", False) and eligible_for_reserve)
+        )
+        t_day_gap_exprs = []
 
         has_by_day, hours_by_day = {}, {}
         busy_cells = {}
@@ -524,9 +631,9 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
             # KURAL: öğretmene günde 1 saat ders verilmez (0 ya da en az 2)
             model.Add(hours >= (2 if prof["weekly"] >= 2 else 1)).OnlyEnforceIf(h)
 
-            # 📌 ÖNCELİKLİ TAM DOLDURULACAK GÜN & SON SAATLER
-            if prof.get("priority_full_day") == d:
-                # O gün olabildiğince çok ders koyulması için güçlü negatif ceza (maksimize et)
+            # 📌 ÖNCELİKLİ TAM DOLDURULACAK GÜN & SON SAATLER (Çoklu Gün Destekli)
+            if d in prof.get("priority_full_days", ()):
+                # Seçilen günlerde olabildiğince çok ders koyulması için güçlü negatif ceza (maksimize et)
                 terms["rules"].append(-50 * hours)
                 if prof.get("fill_late_hours") and P >= 2:
                     # Son saatler (P ve P-1) dolu olsun
@@ -542,36 +649,51 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
                     sv = model.NewBoolVar(f"s_{t.id}_{d}_{p}")
                     model.Add(sv >= s[p - 1])
                     model.Add(sv >= busy[p])
+                    model.Add(sv <= s[p - 1] + busy[p])
                     model.AddImplication(sv, h)
                     s[p] = sv
                 for p in range(P - 1, 0, -1):
                     ev = model.NewBoolVar(f"e_{t.id}_{d}_{p}")
                     model.Add(ev >= e[p + 1])
                     model.Add(ev >= busy[p])
+                    model.Add(ev <= e[p + 1] + busy[p])
                     model.AddImplication(ev, h)
                     e[p] = ev
                 day_gaps = sum(s.values()) + sum(e.values()) - P * h - hours
+                t_day_gap_exprs.append(day_gaps)
+
+                # 🛡️ Saatlik Yedek / Nöbetçi Öğretmen Güvencesi (İlk ve son saat hariç tüm ara saatler: 2 .. P-1)
+                # in_gap[t, d, p] = s[p] + e[p] - h - busy[p]  ∈ {0, 1}
+                # Yalnızca öğretmenin o gün ilk dersi başlamışsa (s[p]=1), son dersi henüz bitmemişse (e[p]=1)
+                # ve tam p. saatte dersi boşsa (busy[p]=0) 1 değerini alır.
+                if o.get("enforce_hourly_reserve", False) and eligible_for_reserve:
+                    for p in range(2, P):
+                        hourly_reserve_exprs[d, p].append(s[p] + e[p] - h - busy[p])
 
                 if prof["is_part_time"]:
                     terms["rules"].append(4 * day_gaps)  # 1-2 gün gelenler penceresiz olmalı
                 elif o["minimize_gaps"]:
                     # 📈 Kademeli & Konveks Pencere Cezası:
-                    # 1 pencere = 1 birim ceza
-                    # 2 pencere = 1 + 2 = 3 birim ceza
-                    # 3 pencere ve üzeri = her biri için +4 ek artırımlı ceza (öğretmene 3+ pencere yığılmasını engeller)
-                    terms["gaps"].append(day_gaps)
-                    extra1 = model.NewIntVar(0, P, f"gx1_{t.id}_{d}")
-                    model.Add(extra1 >= day_gaps - 1)
-                    terms["gaps"].append(2 * extra1)
+                    # Eğer asgari pencere kuralı (müdürün haftalık 3-4 saat proje/dinlenme hedefi) aktifse,
+                    # meşru boşlukları cezalandırmamak için gündeki ilk boşluk cezasız tutulur.
+                    # Yalnızca aynı gündeki 2 ve üzeri aşırı boşluklar kademeli cezalandırılarak boşlukların günlere adil yayılması sağlanır.
+                    if o["enforce_min_total_gaps"] and o["min_total_gaps"] > 0:
+                        extra1 = model.NewIntVar(0, P, f"gx1_{t.id}_{d}")
+                        model.Add(extra1 >= day_gaps - 1)
+                        terms["gaps"].append(2 * extra1)
 
-                    extra2 = model.NewIntVar(0, P, f"gx2_{t.id}_{d}")
-                    model.Add(extra2 >= day_gaps - 2)
-                    terms["gaps"].append(4 * extra2)
+                        extra2 = model.NewIntVar(0, P, f"gx2_{t.id}_{d}")
+                        model.Add(extra2 >= day_gaps - 2)
+                        terms["gaps"].append(4 * extra2)
+                    else:
+                        terms["gaps"].append(day_gaps)
+                        extra1 = model.NewIntVar(0, P, f"gx1_{t.id}_{d}")
+                        model.Add(extra1 >= day_gaps - 1)
+                        terms["gaps"].append(2 * extra1)
 
-                if soft_rules and o["enforce_max_gaps"]:
-                    gx = model.NewIntVar(0, P, f"gex_{t.id}_{d}")
-                    model.Add(gx >= day_gaps - o["max_gaps_per_day"])
-                    terms["rules"].append(gx)
+                        extra2 = model.NewIntVar(0, P, f"gx2_{t.id}_{d}")
+                        model.Add(extra2 >= day_gaps - 2)
+                        terms["gaps"].append(4 * extra2)
 
             if o["early_start"] and soft_rules:
                 open_slots = [p for p in range(1, P + 1) if p not in prof["closed"][d]]
@@ -588,6 +710,80 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
                 model.Add(short >= adaptive_min * h - hours)
                 terms["rules"].append(short)
 
+        # 📌 Öğretmen Haftalık Toplam Pencere (Boşluk) Kuralları
+        if t_day_gap_exprs and soft_rules:
+            week_gaps = sum(t_day_gap_exprs)
+            is_gap_exempt = (t.id in o.get("gap_exempt_ids", set()))
+
+            # A) Haftalık Toplam Maksimum Pencere Sınırı
+            if o["enforce_max_total_gaps"]:
+                max_tot = o["max_total_gaps"]
+                if is_gap_exempt:
+                    # Kullanıcı tanımlı istisna (süt izni, idareci vb.): sert kısıt uygulanmaz, hafif esnek ceza
+                    gx_tot = model.NewIntVar(0, num_days * P, f"gex_tot_{t.id}")
+                    model.Add(gx_tot >= week_gaps - max_tot)
+                    terms["rules"].append(2 * gx_tot)
+                elif o["max_total_gaps_level"] == "high" and not allow_soft_gaps:
+                    model.Add(week_gaps <= max_tot)
+                else:
+                    gx_tot = model.NewIntVar(0, num_days * P, f"gex_tot_{t.id}")
+                    model.Add(gx_tot >= week_gaps - max_tot)
+                    p_tot_coef = 100 if o["max_total_gaps_level"] == "high" else max(1, o.get("max_total_gaps_penalty", 60) // 10)
+                    if o.get("enforce_hourly_reserve", False) and o.get("enforce_categorical_fairness", True) and eligible_for_reserve:
+                        p_tot_coef = max(p_tot_coef, 120)
+                    terms["rules"].append(p_tot_coef * gx_tot)
+
+            # B) Haftalık Toplam Asgari (Minimum) Pencere Sınırı (Dinlenme / Nöbet / Proje Güvencesi)
+            if o["enforce_min_total_gaps"] and o["min_total_gaps"] > 0 and prof["weekly"] >= 10:
+                min_tot = o["min_total_gaps"]
+                # 🎯 Dinamik Kapasite Analizi:
+                # Okulda açık saatler ile haftalık ders yükü arasındaki fark öğretmenin azami boşluk kapasitesidir.
+                t_open_slots = sum(P - len(prof["closed"].get(d, set())) for d in days)
+                t_free_capacity = max(0, t_open_slots - prof["weekly"])
+
+                if is_gap_exempt:
+                    # Kullanıcı tanımlı istisna (süt izni vb.): asgari boşluk zorunluluğu aranmaz!
+                    pass
+                elif t_free_capacity >= min_tot:
+                    # Yeterli boşluğu olan öğretmen: Asgari pencere değişkeni (Aşama 1.5'te tavizsiz kilitlenir)
+                    gmin_tot = model.NewIntVar(0, min_tot, f"gmin_tot_{t.id}")
+                    model.Add(gmin_tot >= min_tot - week_gaps)
+                    p_min_coef = 100 if o["min_total_gaps_level"] == "high" else max(1, o.get("min_total_gaps_penalty", 60) // 10)
+                    terms["rules"].append(p_min_coef * gmin_tot)
+                    terms.setdefault("min_gap_slacks", []).append(gmin_tot)
+                elif t_free_capacity > 0:
+                    # Kapasitesi sınırlı öğretmen: Kullanıcının belirttiği gibi makul esneme (taviz verilmesi makuldür)
+                    # Fiziksel olarak alabileceği azami boşluğu (t_free_capacity) teşvik et
+                    eff_min = t_free_capacity
+                    gmin_tot = model.NewIntVar(0, eff_min, f"gmin_cap_{t.id}")
+                    model.Add(gmin_tot >= eff_min - week_gaps)
+                    terms["rules"].append(2 * gmin_tot)
+                    terms.setdefault("min_gap_slacks", []).append(gmin_tot)
+                # t_free_capacity == 0 ise: Tüm açık saatleri dersle dolu olan öğretmen (ör. 21 açık, 21 ders),
+                # kilitlenmeyi önlemek için kuraldan otomatik muaf tutulur.
+
+            # C) ⚖️ Kategorik Adil Pencere Dağılımı (Ders Yükü × Boş Slot Matrisi)
+            if o.get("enforce_hourly_reserve", False) and o.get("enforce_categorical_fairness", True) and eligible_for_reserve:
+                cat_min = prof.get("cat_min_gaps", 0)
+                cat_max = prof.get("cat_max_gaps", 3)
+
+                # 1. Kategorik Üst Sınır (Dar marj: 0-1s, Sınırlı marj: 1-2s, Geniş marj: 1-3s)
+                cat_over = model.NewIntVar(0, num_days * P, f"cat_over_{t.id}")
+                model.Add(cat_over >= week_gaps - cat_max)
+                terms["rules"].append(80 * cat_over)
+
+                # Geniş marjlı (cat_max=3) öğretmenlerde bile 2 saatin üzerindeki 3. pencereyi caydır (1-2 bandını teşvik et)
+                if cat_max >= 3:
+                    cat_over2 = model.NewIntVar(0, num_days * P, f"cat_over2_{t.id}")
+                    model.Add(cat_over2 >= week_gaps - 2)
+                    terms["gaps"].append(8 * cat_over2)
+
+                # 2. Kategorik Alt Katkı (Boş slotu >= 3 olanlar 0 pencereyle sıyrılamaz, en az 1 saat yedek havuzuna katılır)
+                if cat_min > 0:
+                    cat_under = model.NewIntVar(0, cat_min, f"cat_under_{t.id}")
+                    model.Add(cat_under >= cat_min - week_gaps)
+                    terms["rules"].append(35 * cat_under)
+
         # 1-2 gün gelen istisna öğretmenler: asgari gün
         if prof["is_part_time"] and prof["weekly"] > 0:
             min_days_needed = max(1, math.ceil(prof["weekly"] / prof["hard_cap"]))
@@ -595,9 +791,32 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
             model.Add(extra_days >= sum(has_by_day[d] for d in days) - min_days_needed)
             terms["rules"].append(extra_days)
 
+        # 📅 Haftalık Asgari Aktif Ders Günü Güvencesi (İstisna dışında 3 gün ve altında ders vermeme)
+        is_min_days_exempt = (
+            prof["exempt"]
+            or prof.get("is_part_time", False)
+            or (t.id in o.get("min_days_exempt_ids", set()))
+            or prof.get("free_day_pref") == "floating_2_days"
+        )
+        eff_min_active_days = 0
+        if o.get("enforce_min_active_days", True) and not is_min_days_exempt and prof["weekly"] > 0:
+            max_possible_days = min(prof["num_avail_days"], max(1, prof["weekly"] // 2))
+            eff_min_active_days = min(o["min_active_days"], max_possible_days)
+            if eff_min_active_days > 0:
+                active_days_expr = sum(has_by_day[d] for d in days)
+                if o.get("min_active_days_level", "high") == "high" and not allow_soft_gaps:
+                    model.Add(active_days_expr >= eff_min_active_days)
+                else:
+                    md_short = model.NewIntVar(0, eff_min_active_days, f"mdshort_{t.id}")
+                    model.Add(md_short >= eff_min_active_days - active_days_expr)
+                    p_md_coef = 120 if o.get("min_active_days_level") == "high" else max(1, int(o.get("min_active_days_penalty", 100)) // 10)
+                    terms["rules"].append(p_md_coef * md_short)
+
         # Standart öğretmenler: boş gün teşviki (B kademesi)
         if soft_rules and prof["weekly"] > 0:
             min_days_std = min(num_days, max(1, math.ceil(prof["weekly"] / prof["rule_cap"])))
+            if eff_min_active_days > 0:
+                min_days_std = max(min_days_std, eff_min_active_days)
             if min_days_std < num_days:
                 extra_std = model.NewIntVar(0, num_days, f"edays_std_{t.id}")
                 model.Add(extra_std >= sum(has_by_day[d] for d in days) - min_days_std)
@@ -666,6 +885,24 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
                 model.Add(sum(morn_free_vars) == 0).OnlyEnforceIf(morn_sat.Not())
                 terms["rules"].append(120 * (1 - morn_sat))
 
+    # ---- 🛡️ Saatlik Yedek / Nöbetçi Öğretmen Güvencesi (İlk ve son saat hariç tüm ara saatler: 2 .. P-1)
+    if o.get("enforce_hourly_reserve", False) and P >= 3:
+        target_res = max(1, int(o.get("min_hourly_reserve", 1)))
+        for d in days:
+            for p in range(2, P):
+                exprs = hourly_reserve_exprs.get((d, p), [])
+                if not exprs:
+                    continue
+                eff_res = min(target_res, len(exprs))
+                if o.get("hourly_reserve_level") == "high" and not allow_soft_gaps:
+                    model.Add(sum(exprs) >= eff_res)
+                else:
+                    hres_short = model.NewIntVar(0, eff_res, f"hres_short_{d}_{p}")
+                    model.Add(sum(exprs) + hres_short >= eff_res)
+                    p_res_coef = 120 if o.get("hourly_reserve_level") == "high" else max(1, int(o.get("hourly_reserve_penalty", 60)) // 10)
+                    terms["rules"].append(p_res_coef * hres_short)
+                    terms.setdefault("reserve_slacks", []).append(hres_short)
+
     # ---- Öğretmen-sınıf bitişiklik / günlük yoğunluk kuralı (FET Tarzı Lokal Esnetme Destekli)
     if use_consecutive:
         for (t_id, c_id), pair_acts in by_pair.items():
@@ -694,24 +931,24 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
                     else:
                         model.Add(day_sum <= 4)
                 else:
-                    # 💡 DERS 1 (FET Yaklaşımı): Yalnızca aşım ihtimali olan çiftlerde hafif slack oluştur
+                    # 💡 DERS 1 (FET Yaklaşımı): Aşım ihtimali olan çiftlerde kısıt
                     if weekly > max_day_pair:
                         over_h = model.NewIntVar(0, P, f"consec_over_{t_id}_{c_id}_{d}")
                         model.Add(day_sum - max_day_pair <= over_h)
-                        terms["rules"].append(2 * over_h)
+                        terms["rules"].append(200 * over_h)
                         terms["consec_slacks"].append(over_h)
 
-                    if weekly <= 10 and has_single:
-                        tc = {p: sum(cover(pair_acts, d, p)) for p in range(1, P + 1)}
-                        starts = []
-                        for p in range(1, P + 1):
-                            st = model.NewBoolVar(f"pst_{t_id}_{c_id}_{d}_{p}")
-                            model.Add(st >= tc[p] - (tc[p - 1] if p > 1 else 0))
-                            starts.append(st)
-                        split_s = model.NewIntVar(0, P, f"consec_split_{t_id}_{c_id}_{d}")
-                        model.Add(sum(starts) - 1 <= split_s)
-                        terms["rules"].append(split_s)
-                        terms["consec_slacks"].append(split_s)
+                    # Blok bitişikliği: Aynı sınıfa aynı gün giren dersler bitişik blok olmalı (araya başka ders giremez!)
+                    tc = {p: sum(cover(pair_acts, d, p)) for p in range(1, P + 1)}
+                    starts = []
+                    for p in range(1, P + 1):
+                        st = model.NewBoolVar(f"pst_{t_id}_{c_id}_{d}_{p}")
+                        model.Add(st >= tc[p] - (tc[p - 1] if p > 1 else 0))
+                        starts.append(st)
+                    split_s = model.NewIntVar(0, P, f"consec_split_{t_id}_{c_id}_{d}")
+                    model.Add(sum(starts) - 1 <= split_s)
+                    terms["rules"].append(500 * split_s)
+                    terms["consec_slacks"].append(split_s)
 
     # ---- Aynı sınıfta aynı ders günde en fazla 1-2 kez başlar (istisna öğretmenler muaf)
     for c in classrooms:
@@ -734,7 +971,7 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
                 else:
                     c_dup = model.NewIntVar(0, len(sub_acts), f"cdup_{c.id}_{sub_acts[0]['id']}_{d}")
                     model.Add(day_starts - limit <= c_dup)
-                    terms["rules"].append(2 * c_dup)
+                    terms["rules"].append(200 * c_dup)
                     terms["consec_slacks"].append(c_dup)
 
     # ---- Yoğun ders kuralı (haftalık > 6 saat olan ders günde en çok N saat)
@@ -943,7 +1180,7 @@ def hint_from(model, solver):
         hint.vars.extend(range(n))
         hint.values.extend(values)
     else:  # güvenli yedek
-        for i in range(n):
+        for i in range(min(n, len(values))):
             v = model.GetIntVarFromProtoIndex(i)
             model.AddHint(v, solver.Value(v))
 
@@ -972,11 +1209,129 @@ def extract(solver, x, activities, classrooms, teachers, days, P):
     return timetable, busy
 
 
-def audit(busy, teachers, profiles, days, o, timetable=None, classrooms=None):
+def unify_blocks_post_solve(timetable, busy, classrooms, teachers, profiles, days, P, o):
+    """
+    Dağıtım sonrası deterministik yerel birleştirme geçidi:
+    1. Aynı sınıfta ve aynı günde ayrık kalmış ders bloklarını (araya başka ders girmişse) güvenli yerel takaslarla birleştirir.
+    2. Tek saatlik parçaları (örn. 1+1 saat ayrılmış bloklar) mümkünse birleştirir.
+    3. Hiçbir öğretmen çakışması, kapalı saat veya kural bozulmasına izin vermez.
+    """
+    if not o.get("enforce_consecutive", True):
+        return timetable, busy
+
+    improved = True
+    iterations = 0
+
+    while improved and iterations < 20:
+        improved = False
+        iterations += 1
+
+        for c in classrooms:
+            c_days = timetable.get(c.id, {})
+            for d in days:
+                slots = c_days.get(d, [])
+                if len(slots) < 3:
+                    continue
+
+                slot_by_p = {s["period"]: s for s in slots}
+                periods = sorted(slot_by_p.keys())
+
+                # A) Aynı gün içindeki ayrık blokları birleştirme denemesi (Intra-day swap)
+                for i in range(len(periods)):
+                    p1 = periods[i]
+                    s1 = slot_by_p[p1]
+                    t1_id = s1.get("teacherId")
+                    subj1 = s1.get("subject")
+
+                    for j in range(i + 1, len(periods)):
+                        p2 = periods[j]
+                        s2 = slot_by_p[p2]
+                        t2_id = s2.get("teacherId")
+                        subj2 = s2.get("subject")
+
+                        if t1_id == t2_id and subj1 == subj2:
+                            continue
+
+                        # Mevcut komşular
+                        curr_adj1 = (p1 - 1 in slot_by_p and slot_by_p[p1 - 1].get("teacherId") == t1_id and slot_by_p[p1 - 1].get("subject") == subj1) or \
+                                    (p1 + 1 in slot_by_p and slot_by_p[p1 + 1].get("teacherId") == t1_id and slot_by_p[p1 + 1].get("subject") == subj1)
+                        curr_adj2 = (p2 - 1 in slot_by_p and slot_by_p[p2 - 1].get("teacherId") == t2_id and slot_by_p[p2 - 1].get("subject") == subj2) or \
+                                    (p2 + 1 in slot_by_p and slot_by_p[p2 + 1].get("teacherId") == t2_id and slot_by_p[p2 + 1].get("subject") == subj2)
+
+                        # Takas sonrası komşular (s1 p2'ye, s2 p1'e)
+                        new_adj1 = False
+                        if p2 - 1 in slot_by_p and p2 - 1 != p1:
+                            new_adj1 = new_adj1 or (slot_by_p[p2 - 1].get("teacherId") == t1_id and slot_by_p[p2 - 1].get("subject") == subj1)
+                        if p2 + 1 in slot_by_p and p2 + 1 != p1:
+                            new_adj1 = new_adj1 or (slot_by_p[p2 + 1].get("teacherId") == t1_id and slot_by_p[p2 + 1].get("subject") == subj1)
+
+                        new_adj2 = False
+                        if p1 - 1 in slot_by_p and p1 - 1 != p2:
+                            new_adj2 = new_adj2 or (slot_by_p[p1 - 1].get("teacherId") == t2_id and slot_by_p[p1 - 1].get("subject") == subj2)
+                        if p1 + 1 in slot_by_p and p1 + 1 != p2:
+                            new_adj2 = new_adj2 or (slot_by_p[p1 + 1].get("teacherId") == t2_id and slot_by_p[p1 + 1].get("subject") == subj2)
+
+                        gain = (int(new_adj1) + int(new_adj2)) - (int(curr_adj1) + int(curr_adj2))
+                        if gain <= 0:
+                            continue
+
+                        # Çakışma ve Müsaitlik Kontrolleri
+                        if t1_id and p2 in busy.get(t1_id, {}).get(d, set()):
+                            continue
+                        if t1_id and p2 in profiles.get(t1_id, {}).get("closed", {}).get(d, set()):
+                            continue
+
+                        if t2_id and p1 in busy.get(t2_id, {}).get(d, set()):
+                            continue
+                        if t2_id and p1 in profiles.get(t2_id, {}).get("closed", {}).get(d, set()):
+                            continue
+
+                        # GÜVENLİ TAKASI UYGULA
+                        s1["period"] = p2
+                        s2["period"] = p1
+                        slot_by_p[p2] = s1
+                        slot_by_p[p1] = s2
+
+                        if t1_id:
+                            busy[t1_id][d].discard(p1)
+                            busy[t1_id][d].add(p2)
+                        if t2_id:
+                            busy[t2_id][d].discard(p2)
+                            busy[t2_id][d].add(p1)
+
+                        improved = True
+                        break
+                    if improved:
+                        break
+
+                if improved:
+                    slots.sort(key=lambda it: it["period"])
+
+    return timetable, busy
+
+
+def audit(busy, teachers, profiles, days, o, timetable=None, classrooms=None, P=None):
     """
     Çözüm üzerinden bağımsız denetim: kural ihlallerini ve hangi öğretmende/sınıfta
     hangi kuralın esnetildiğini (relaxed_rules) detaylı olarak raporlar.
     """
+    if P is None:
+        # Fallback: gün içindeki maksimum periyot sayısı (veya varsayılan 8)
+        max_p = 8
+        if timetable:
+            for c_days in timetable.values():
+                for d_slots in c_days.values():
+                    for s in d_slots:
+                        max_p = max(max_p, int(s.get("period", 0)))
+        if busy:
+            for d_map in busy.values():
+                for periods_set in d_map.values():
+                    if periods_set:
+                        max_p = max(max_p, max(periods_set))
+        P = max_p
+    else:
+        P = int(P)
+
     msgs = []
     relaxed_rules = []
     gap_report, total_gaps = {}, 0
@@ -1030,17 +1385,17 @@ def audit(busy, teachers, profiles, days, o, timetable=None, classrooms=None):
                             "description": desc,
                         })
 
-                    # B) Aynı gün aynı sınıftaki derslerin bölünmesi (araya başka ders girmesi)
+                    # B) Aynı gün aynı sınıftaki derslerin bölünmesi (araya başka ders girmesi - ESNETİLEMEZ İHLAL!)
                     if len(periods) >= 2:
                         blocks = 1
                         for i in range(1, len(periods)):
                             if periods[i] != periods[i - 1] + 1:
                                 blocks += 1
-                        if blocks > 1 and weekly_in_class <= 10:
+                        if blocks > 1:
                             p_str = ", ".join(f"{p}." for p in periods)
                             desc = (f"{t_name} ({c.name} – {subj_str}): {d} günü dersler bitişik blok yerine "
                                     f"ayrık saatlere ({p_str} saatler) yerleşti.")
-                            msgs.append(f"🔧 Kural Esnetme: {desc}")
+                            msgs.append(f"🚨 Kritik Blok Bölünmesi İhlali: {desc}")
                             relaxed_rules.append({
                                 "teacherId": t_id,
                                 "teacherName": t_name,
@@ -1048,9 +1403,34 @@ def audit(busy, teachers, profiles, days, o, timetable=None, classrooms=None):
                                 "className": c.name,
                                 "subject": subj_str,
                                 "day": d,
-                                "ruleType": "Blok Bitişikliği Esnetmesi",
+                                "ruleType": "Kritik Blok Bölünmesi İhlali",
                                 "description": desc,
+                                "isCritical": True,
                             })
+
+    # 1b. Yoğun Ders Günlük Tavan Sınırı Denetimi (Haftalık > 6 saat olan dersler)
+    if o.get("enforce_intensive") and classrooms and timetable:
+        for c in classrooms:
+            c_days = timetable.get(c.id, {})
+            intensive_courses = [co for co in c.courses if getattr(co, "hoursPerWeek", 0) > 6]
+            for co in intensive_courses:
+                for d in days:
+                    slots = [s for s in c_days.get(d, []) if s.get("subject") == co.subject and (not co.teacherId or s.get("teacherId") == co.teacherId)]
+                    if len(slots) > o["max_intensive_hours"]:
+                        t_obj = next((tr for tr in teachers if tr.id == co.teacherId), None)
+                        t_name = t_obj.name if t_obj else "Öğretmen"
+                        desc = f"{c.name} – {co.subject} ({t_name}): {d} günü {len(slots)} saat ders yerleşti (azami sınır: {o['max_intensive_hours']} saat)."
+                        msgs.append(f"🔧 Kural Esnetme: {desc}")
+                        relaxed_rules.append({
+                            "teacherId": co.teacherId,
+                            "teacherName": t_name,
+                            "classId": c.id,
+                            "className": c.name,
+                            "subject": co.subject,
+                            "day": d,
+                            "ruleType": "Yoğun Ders Günlük Tavan Esnetmesi",
+                            "description": desc,
+                        })
 
     # 2. Öğretmen Bazlı Pencere, Günlük Asgari Saat ve Boş Gün Esnetmeleri
     for t in teachers:
@@ -1063,8 +1443,30 @@ def audit(busy, teachers, profiles, days, o, timetable=None, classrooms=None):
             if b:
                 g = sum(1 for p in range(min(b), max(b) + 1) if p not in b)
                 t_gaps += g
-                if not prof["exempt"] and not prof.get("is_part_time", False) and o["enforce_max_gaps"] and g > o["max_gaps_per_day"]:
-                    desc = f"{t.name} – {d}: {g} saat pencere oluştu (normal sınır: en fazla {o['max_gaps_per_day']} boşluk)."
+        gap_report[t.name] = t_gaps
+        total_gaps += t_gaps
+
+        # 📌 Öğretmen Haftalık Toplam Pencere Denetimi
+        is_gap_exempt = (t.id in o.get("gap_exempt_ids", set()))
+        if not prof["exempt"] and not prof.get("is_part_time", False) and not is_gap_exempt and prof["weekly"] > 0:
+            if o["enforce_max_total_gaps"] and t_gaps > o["max_total_gaps"]:
+                desc = f"{t.name}: Haftalık toplam {t_gaps} saat pencere oluştu (azami sınır: en fazla {o['max_total_gaps']} saat)."
+                msgs.append(desc)
+                relaxed_rules.append({
+                    "teacherId": t.id,
+                    "teacherName": t.name,
+                    "classId": None,
+                    "className": None,
+                    "subject": t.branch,
+                    "day": "Haftalık",
+                    "ruleType": "Haftalık Toplam Azami Pencere Esnetmesi",
+                    "description": desc,
+                })
+            if o["enforce_min_total_gaps"] and o["min_total_gaps"] > 0 and prof["weekly"] >= 10:
+                t_open_slots = sum(P - len(prof["closed"].get(d, set())) for d in days)
+                t_free_capacity = max(0, t_open_slots - prof["weekly"])
+                if t_free_capacity >= o["min_total_gaps"] and t_gaps < o["min_total_gaps"]:
+                    desc = f"{t.name}: Haftalık toplam {t_gaps} saat pencere oluştu (asgari şart: en az {o['min_total_gaps']} saat boşluk)."
                     msgs.append(desc)
                     relaxed_rules.append({
                         "teacherId": t.id,
@@ -1072,17 +1474,21 @@ def audit(busy, teachers, profiles, days, o, timetable=None, classrooms=None):
                         "classId": None,
                         "className": None,
                         "subject": t.branch,
-                        "day": d,
-                        "ruleType": "Günlük Azami Pencere Esnetmesi",
+                        "day": "Haftalık",
+                        "ruleType": "Haftalık Toplam Asgari Pencere Esnetmesi",
                         "description": desc,
                     })
-        gap_report[t.name] = t_gaps
-        total_gaps += t_gaps
         if not prof["exempt"] and not prof.get("is_part_time", False) and o["enforce_daily_balance"] and prof["weekly"] > 0:
             active = [d for d in days if hours[d] > 0]
             adaptive_min = min(o["min_daily_hours"], prof["weekly"])
+            rem = prof["weekly"] % adaptive_min
+            days_below_min = [d for d in active if hours[d] < adaptive_min]
+            has_single_rem_day = (rem > 0 and len(days_below_min) == 1)
+
             for d in active:
                 if hours[d] < adaptive_min:
+                    if has_single_rem_day and hours[d] == rem:
+                        continue
                     desc = f"{t.name} – {d}: Günde {hours[d]} saat ders yerleşti (asgari {adaptive_min} saat kuralı esnetildi)."
                     msgs.append(desc)
                     relaxed_rules.append({
@@ -1099,6 +1505,28 @@ def audit(busy, teachers, profiles, days, o, timetable=None, classrooms=None):
         # Kayan gün tercihi denetimi
         f_day = prof.get("free_day_pref", "none")
         active_days = [d for d in days if hours[d] > 0]
+        is_min_days_exempt = (
+            prof["exempt"]
+            or prof.get("is_part_time", False)
+            or (t.id in o.get("min_days_exempt_ids", set()))
+            or f_day == "floating_2_days"
+        )
+        if o.get("enforce_min_active_days", True) and not is_min_days_exempt and prof["weekly"] > 0:
+            max_possible_days = min(prof.get("num_avail_days", len(days)), max(1, prof["weekly"] // 2))
+            eff_min_active_days = min(o.get("min_active_days", 4), max_possible_days)
+            if len(active_days) < eff_min_active_days:
+                desc = f"{t.name}: Haftada {len(active_days)} güne ders yerleşti (asgari {eff_min_active_days} aktif gün kuralı esnetildi)."
+                msgs.append(desc)
+                relaxed_rules.append({
+                    "teacherId": t.id,
+                    "teacherName": t.name,
+                    "classId": None,
+                    "className": None,
+                    "subject": t.branch,
+                    "day": "Haftalık",
+                    "ruleType": "Haftalık Asgari Ders Günü Esnetmesi",
+                    "description": desc,
+                })
         if f_day == "floating_1_day" and len(active_days) > len(days) - 1:
             desc = f"{t.name}: 1 gün esnek boş gün tercihi esnetildi ({len(active_days)} güne ders yerleşti)."
             msgs.append(desc)
@@ -1125,6 +1553,48 @@ def audit(busy, teachers, profiles, days, o, timetable=None, classrooms=None):
                 "ruleType": "Esnek Boş Gün Esnetmesi",
                 "description": desc,
             })
+
+    # 3. Saatlik Yedek / Nöbetçi Öğretmen Güvencesi Denetimi (İlk ve son saat hariç tüm ara saatler: 2 .. P-1)
+    if o.get("enforce_hourly_reserve", False) and P >= 3:
+        target_res = max(1, int(o.get("min_hourly_reserve", 1)))
+        gap_exempt_set = o.get("gap_exempt_ids", set())
+        elig_teachers = [
+            t for t in teachers
+            if not profiles[t.id].get("is_admin", False)
+            and not profiles[t.id]["exempt"]
+            and not profiles[t.id].get("is_part_time", False)
+            and t.id not in gap_exempt_set
+            and profiles[t.id]["weekly"] > 0
+        ]
+        for d in days:
+            for p in range(2, P):
+                in_gap_cnt = 0
+                free_present_cnt = 0
+                for t in elig_teachers:
+                    b_set = busy[t.id][d]
+                    closed_set = profiles[t.id]["closed"].get(d, set())
+                    is_closed_at_p = p in closed_set
+                    has_lesson_at_p = p in b_set
+
+                    if b_set and min(b_set) < p < max(b_set) and not has_lesson_at_p:
+                        in_gap_cnt += 1
+                    if b_set and not is_closed_at_p and not has_lesson_at_p:
+                        free_present_cnt += 1
+
+                if in_gap_cnt < target_res and free_present_cnt < target_res:
+                    desc = f"{d} günü {p}. ders saatinde okulda boşta (pencerede) {in_gap_cnt} öğretmen bulundu (hedef: en az {target_res} öğretmen)."
+                    msgs.append(desc)
+                    relaxed_rules.append({
+                        "teacherId": None,
+                        "teacherName": "Okul Geneli",
+                        "classId": None,
+                        "className": None,
+                        "subject": f"{p}. Ders Saati",
+                        "day": d,
+                        "ruleType": "Saatlik Yedek Öğretmen Esnetmesi",
+                        "description": desc,
+                    })
+
     return msgs, gap_report, total_gaps, relaxed_rules
 
 
@@ -1269,13 +1739,15 @@ def solve(request: SolveRequest):
         use_consec = o["enforce_consecutive"]
         allow_soft_consec = False
         allow_soft_float = False
+        allow_soft_gaps = bool(o.get("enforce_min_total_gaps") or o.get("enforce_hourly_reserve"))
         lunch_after = getattr(request.settings, "lunchBreakAfter", None)
         model, x, terms, build_warn, busy_by_teacher = build_model(
             use_consec, activities, classrooms, teachers,
             days, P, profiles, o, pinned_slots,
             allow_soft_floating=allow_soft_float,
             lunch_after=lunch_after,
-            allow_soft_consecutive=allow_soft_consec
+            allow_soft_consecutive=allow_soft_consec,
+            allow_soft_gaps=allow_soft_gaps
         )
         num_vars = len(model.Proto().variables)
         print(f"[solver] model kuruldu {time.time() - start:.1f}s, işçi={workers}, "
@@ -1295,11 +1767,21 @@ def solve(request: SolveRequest):
             hard_names = ", ".join(f"{ht['name']} (%{ht['density']} yoğunluk)" for ht in top_hardest[:3])
             add_live_feed(f"🎯 Zorluk sırasına göre ilk yerleştirilecek düğümler: {hard_names}", "info")
 
-        # Aşama 0'da modelde amaç fonksiyonu (Minimize) olmadığı için CP-SAT ilk geçerli çözümü bulduğu salisede durur.
-        # Bu nedenle 25sn gibi yapay bir tavan koymak hızlı CPU'da süre kazandırmaz, yalnızca bulut CPU'da aramayı yarıda keser.
+        # Aşama 0: Modelde kuralların gevşetilmesini ve blokların bölünmesini önlemek için
+        # varsa slack ve kural değişkenleri aktif olarak minimize edilir.
+        obj_parts0 = []
+        if terms.get("consec_slacks"):
+            obj_parts0.append(sum(500 * s for s in terms["consec_slacks"]))
+        if terms.get("rules"):
+            obj_parts0.append(sum(terms["rules"]))
+        if obj_parts0:
+            model.Minimize(sum(obj_parts0))
+
         phase0_time = remaining() if o["stop_at_first"] else max(45.0, remaining() * 0.70)
-        solver, st, _ = run_solver(model, phase0_time, workers, busy_by_teacher=busy_by_teacher, phase_label="Temel Yerleşim")
-        print(f"[solver] temel (bitişiklik={'sert' if not allow_soft_consec else 'esnek'}, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}): "
+        patience0 = 1.5 if o["stop_at_first"] else (min(10.0, max(4.0, phase0_time * 0.2)) if obj_parts0 else None)
+        solver, st, _ = run_solver(model, phase0_time, workers, patience=patience0, busy_by_teacher=busy_by_teacher, phase_label="Temel Yerleşim")
+        model.ClearObjective()
+        print(f"[solver] temel (bitişiklik={'sert' if not allow_soft_consec else 'esnek'}, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}, tavizsiz_pencere={'sert' if not allow_soft_gaps else 'esnek'}): "
               f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
 
         if not ok(st) and (use_consec and not allow_soft_consec) and st in (cp_model.INFEASIBLE, cp_model.UNKNOWN):
@@ -1321,13 +1803,18 @@ def solve(request: SolveRequest):
                 days, P, profiles, o, pinned_slots,
                 allow_soft_floating=allow_soft_float,
                 lunch_after=lunch_after,
-                allow_soft_consecutive=True
+                allow_soft_consecutive=True,
+                allow_soft_gaps=allow_soft_gaps
             )
-            # Yıldırım modunda bile lokal esnetme sayısını minimumda tutmak için slack'leri kısa sabırla (1.5s) minimize et
-            retry_patience = None
-            if o["stop_at_first"] and terms["consec_slacks"]:
-                model.Minimize(sum(terms["consec_slacks"]))
-                retry_patience = 1.5
+            # Blok bölünmelerini ve kural esnetmelerini aktif minimize et
+            obj_parts1 = []
+            if terms.get("consec_slacks"):
+                obj_parts1.append(sum(500 * s for s in terms["consec_slacks"]))
+            if terms.get("rules"):
+                obj_parts1.append(sum(terms["rules"]))
+            if obj_parts1:
+                model.Minimize(sum(obj_parts1))
+            retry_patience = 1.5 if o["stop_at_first"] else min(10.0, max(3.0, remaining() * 0.25))
             phase0_retry = remaining() if o["stop_at_first"] else max(15.0, remaining() * 0.65)
             solver, st, _ = run_solver(
                 model, phase0_retry, workers,
@@ -1356,12 +1843,17 @@ def solve(request: SolveRequest):
                 days, P, profiles, o, pinned_slots,
                 allow_soft_floating=True,
                 lunch_after=lunch_after,
-                allow_soft_consecutive=True
+                allow_soft_consecutive=True,
+                allow_soft_gaps=allow_soft_gaps
             )
-            retry2_patience = None
-            if o["stop_at_first"] and terms["consec_slacks"]:
-                model.Minimize(sum(terms["consec_slacks"]))
-                retry2_patience = 1.5
+            obj_parts2 = []
+            if terms.get("consec_slacks"):
+                obj_parts2.append(sum(500 * s for s in terms["consec_slacks"]))
+            if terms.get("rules"):
+                obj_parts2.append(sum(terms["rules"]))
+            if obj_parts2:
+                model.Minimize(sum(obj_parts2))
+            retry2_patience = 1.5 if o["stop_at_first"] else min(10.0, max(3.0, remaining() * 0.25))
             phase0_retry2 = max(6.0, remaining())
             solver, st, _ = run_solver(
                 model, phase0_retry2, workers,
@@ -1371,6 +1863,46 @@ def solve(request: SolveRequest):
             )
             model.ClearObjective()
             print(f"[solver] temel deneme 2 (bitişiklik=lokal_esnek, sert_kayan=kapalı): "
+                  f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
+
+        if not ok(st) and not allow_soft_gaps and (o.get("max_total_gaps_level") == "high" or o.get("min_total_gaps_level") == "high" or o.get("hourly_reserve_level") == "high") and st in (cp_model.INFEASIBLE, cp_model.UNKNOWN):
+            allow_soft_gaps = True
+            allow_soft_float = True
+            allow_soft_consec = True
+            update_live_progress(
+                stageTitle="Aşama 1: Tavizsiz Pencere Kısıtları Esnetiliyor",
+                stageDesc="Tavizsiz pencere sınırları hafif esnetilerek geçerli çözüm aranıyor..."
+            )
+            add_live_feed(
+                "Tavizsiz pencere kısıtlarıyla çözüm bulunamadı; pencereler hafif esnetilerek yeniden aranıyor...",
+                "warn"
+            )
+            warnings_extra.append("Tavizsiz pencere kısıtlarıyla çözüm bulunamadı; pencere sınırları yumuşatılarak çözüldü.")
+            model, x, terms, build_warn, busy_by_teacher = build_model(
+                use_consec, activities, classrooms, teachers,
+                days, P, profiles, o, pinned_slots,
+                allow_soft_floating=True,
+                lunch_after=lunch_after,
+                allow_soft_consecutive=True,
+                allow_soft_gaps=True
+            )
+            obj_parts3 = []
+            if terms.get("consec_slacks"):
+                obj_parts3.append(sum(500 * s for s in terms["consec_slacks"]))
+            if terms.get("rules"):
+                obj_parts3.append(sum(terms["rules"]))
+            if obj_parts3:
+                model.Minimize(sum(obj_parts3))
+            retry3_patience = 1.5 if o["stop_at_first"] else min(10.0, max(3.0, remaining() * 0.25))
+            phase0_retry3 = max(6.0, remaining())
+            solver, st, _ = run_solver(
+                model, phase0_retry3, workers,
+                patience=retry3_patience,
+                busy_by_teacher=busy_by_teacher,
+                phase_label="Pencere Esnek Yerleşim"
+            )
+            model.ClearObjective()
+            print(f"[solver] temel deneme 3 (bitişiklik=lokal_esnek, sert_kayan=kapalı, pencere=esnek): "
                   f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
 
         if not ok(st):
@@ -1410,6 +1942,50 @@ def solve(request: SolveRequest):
         stage = "temel"
         stage_details = []
 
+        # 🔒 AŞAMA 1.5: Asgari Pencere (Tavizsiz Boşluk), Blok Bütünlüğü ve Saatlik Yedek Sıkılaştırma & Kilitleme
+        tighten_slacks = []
+        if o.get("enforce_min_total_gaps") and terms.get("min_gap_slacks"):
+            tighten_slacks.extend(terms["min_gap_slacks"])
+        if o.get("enforce_hourly_reserve") and terms.get("reserve_slacks"):
+            tighten_slacks.extend(terms["reserve_slacks"])
+        if o.get("enforce_consecutive") and terms.get("consec_slacks"):
+            tighten_slacks.extend(terms["consec_slacks"])
+
+        if tighten_slacks and not _stop_event.is_set():
+            rem_tight = remaining()
+            if rem_tight >= 2.0:
+                update_live_progress(
+                    stageTitle="Aşama 1.5: Asgari Boşluk & Blok Güvencesi Kilitleniyor",
+                    stageDesc="Öğretmenlerin asgari boşluk, blok bütünlüğü ve saatlik nöbetçi şartı tavizsiz güvenceye alınıyor..."
+                )
+                add_live_feed(
+                    "🔒 Asgari boşluk, blok bütünlüğü ve saatlik nöbetçi güvencesi sıkılaştırılıyor...",
+                    "info"
+                )
+                tighten_time = min(10.0, max(3.0, rem_tight * 0.30))
+                tighten_expr = sum(tighten_slacks)
+                model.Minimize(tighten_expr)
+                hint_from(model, best_solver)
+                tight_solver, tight_st, _ = run_solver(
+                    model, tighten_time, workers, patience=min(7.0, tighten_time),
+                    busy_by_teacher=busy_by_teacher,
+                    phase_label="Asgari Boşluk ve Blok Kilitleme"
+                )
+                if tight_solver is not None and ok(tight_st):
+                    best_solver = tight_solver
+                    best_slack = int(round(tight_solver.ObjectiveValue()))
+                    print(f"[solver] asgari boşluk, blok ve yedek sıkılaştırma: {tight_solver.StatusName(tight_st)} "
+                          f"{tight_solver.WallTime():.1f}s, toplam açık={best_slack}", flush=True)
+                    if o.get("min_total_gaps_level") == "high" or o.get("hourly_reserve_level") == "high" or o.get("enforce_consecutive"):
+                        if best_slack == 0:
+                            model.Add(tighten_expr == 0)
+                            add_live_feed("✅ Asgari boşluk, blok bütünlüğü ve nöbetçi şartları tüm okulda sıfır tavizle (%100) kilitlendi.", "success")
+                        else:
+                            # best_slack > 0 durumunda kalıcı sert kısıt eklenmez; Aşama 2 LNS optimizasyonunun
+                            # bu açık veya bölünmüşlüğü sıfırlamasına izin verilir!
+                            add_live_feed(f"🔒 Asgari boşluk ve bloklar sıkılaştırıldı ({best_slack} açık, Aşama 2'de sıfırlanmaya çalışılacak).", "info")
+                model.ClearObjective()
+
         # ⚡ İLK GEÇERLİ ÇÖZÜMDE DUR: İyileştirme kademeleri atlanır, saniyeler içinde dönülür
         if o["stop_at_first"]:
             print(f"[solver] 'İlk geçerli çözümde dur' devrede. İyileştirme kademeleri atlandı. Geçen süre: {time.time() - start:.2f}s", flush=True)
@@ -1434,10 +2010,18 @@ def solve(request: SolveRequest):
                     "info"
                 )
                 weighted_terms = []
+                gap_weight = max(10, int(o.get("gap_penalty", 40)))
+                # 1. Blok Bütünlüğü ve Sert Kural Koruması (En tepe öncelik: hiçbir pencere cezası bloğu bölemez!)
+                if terms.get("consec_slacks"):
+                    weighted_terms.extend(500000 * s for s in terms["consec_slacks"])
+                if terms.get("reserve_slacks"):
+                    weighted_terms.extend(100000 * s for s in terms["reserve_slacks"])
                 if terms["rules"]:
                     weighted_terms.extend(WEIGHT_RULES * r for r in terms["rules"])
+                # 2. Öğretmen pencereleri / boşlukları
                 if terms["gaps"]:
-                    weighted_terms.extend(WEIGHT_GAPS * g for g in terms["gaps"])
+                    weighted_terms.extend(gap_weight * g for g in terms["gaps"])
+                # 3. Tercihler
                 if terms["prefs"]:
                     weighted_terms.extend(WEIGHT_PREFS * p for p in terms["prefs"])
 
@@ -1475,9 +2059,11 @@ def solve(request: SolveRequest):
             stageDesc="Öğretmen bazlı kural esnetmeleri ve adalet skoru raporlanıyor..."
         )
         timetable, busy = extract(best_solver, x, activities, classrooms, teachers, days, P)
+        # 🧩 Aşama 2.5: Deterministik Post-Solve Blok Birleştirme ve Yerel Temizlik Geçidi
+        timetable, busy = unify_blocks_post_solve(timetable, busy, classrooms, teachers, profiles, days, P, o)
         rule_msgs, gap_report, total_gaps, relaxed_rules = audit(
             busy, teachers, profiles, days, o,
-            timetable=timetable, classrooms=classrooms
+            timetable=timetable, classrooms=classrooms, P=P
         )
         stopped_early = _stop_event.is_set()
         if stopped_early:
@@ -1746,6 +2332,50 @@ def solve(request: SolveRequest):
                         "reason": "; ".join(half_reasons)
                     })
 
+        # 🛡️ Saatlik Yedek / Nöbetçi Öğretmen Raporu (İlk ve son saat hariç tüm ara saatler: 2 .. P-1)
+        gap_exempt_set = o.get("gap_exempt_ids", set())
+        elig_reserve_teachers = [
+            t for t in teachers
+            if not profiles[t.id].get("is_admin", False)
+            and not profiles[t.id]["exempt"]
+            and not profiles[t.id].get("is_part_time", False)
+            and t.id not in gap_exempt_set
+            and profiles[t.id]["weekly"] > 0
+        ]
+        hourly_reserve_report = {}
+        for d in days:
+            hourly_reserve_report[d] = {}
+            for p in range(2, P):
+                avail_names = []
+                for t in elig_reserve_teachers:
+                    b_set = busy.get(t.id, {}).get(d, set())
+                    if b_set and min(b_set) < p < max(b_set) and p not in b_set:
+                        avail_names.append({"id": t.id, "name": t.name, "branch": t.branch})
+                hourly_reserve_report[d][p] = avail_names
+
+        categorical_fairness_report = []
+        for t in elig_reserve_teachers:
+            prof = profiles[t.id]
+            t_g = gap_report.get(t.name, 0)
+            c_min = prof.get("cat_min_gaps", 0)
+            c_max = prof.get("cat_max_gaps", 3)
+            categorical_fairness_report.append({
+                "id": t.id,
+                "name": t.name,
+                "branch": t.branch,
+                "load": prof.get("weekly", 0),
+                "openSlots": prof.get("open_slots", 0),
+                "freeSlots": prof.get("free_slots", 0),
+                "openDays": prof.get("num_avail_days", len(days)),
+                "activeDays": sum(1 for d in days if busy.get(t.id, {}).get(d)),
+                "categoryId": prof.get("cat_id", ""),
+                "categoryLabel": prof.get("cat_label", ""),
+                "targetMinGaps": c_min,
+                "targetMaxGaps": c_max,
+                "actualGaps": t_g,
+                "withinTarget": c_min <= t_g <= c_max,
+            })
+
         total_required = sum(c.hoursPerWeek for cl in classrooms for c in cl.courses)
         return {
             "status": "ok",
@@ -1775,6 +2405,8 @@ def solve(request: SolveRequest):
                 "floatingHalfRequested": floating_half_req_count,
                 "floatingHalfFailed": len(floating_half_failed),
                 "floatingHalfFailedTeachers": floating_half_failed,
+                "hourlyReserveReport": hourly_reserve_report,
+                "categoricalFairnessReport": categorical_fairness_report,
                 "relaxedRules": relaxed_rules,
                 "relaxedRulesCount": len(relaxed_rules),
                 "violations": violations,

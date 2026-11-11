@@ -55,6 +55,7 @@ export interface Teacher {
   isExempt?: boolean;
   isPartTime?: boolean;
   priorityFullDay?: string | null;
+  priorityFullDays?: string[];
   fillLateHours?: boolean;
   isAdministrator?: boolean;
   hasCustomConstraints?: boolean;
@@ -71,12 +72,41 @@ export interface SoftConstraints {
   earlyStartPenalty: number;
   avoidStemLate: boolean;
   stemLatePenalty: number;
+  maxTotalGapsLevel?: 'off' | 'low' | 'medium' | 'high';
+  maxTotalGapsPenalty?: number;
+  minTotalGapsLevel?: 'off' | 'low' | 'medium' | 'high';
+  minTotalGapsPenalty?: number;
+  gapExemptTeacherIds?: string[];
+  hourlyReserveLevel?: 'off' | 'low' | 'medium' | 'high';
+  hourlyReservePenalty?: number;
+  minActiveDaysLevel?: 'off' | 'low' | 'medium' | 'high';
+  minActiveDaysPenalty?: number;
+  minDaysExemptTeacherIds?: string[];
   [key: string]: any;
 }
 
 export interface HardConstraints {
-  enforceMaxGaps: boolean;
-  maxGapsPerDay: number;
+  enforceMaxTotalGaps?: boolean;
+  maxTotalGaps?: number;
+  maxTotalGapsLevel?: 'off' | 'low' | 'medium' | 'high';
+  maxTotalGapsPenalty?: number;
+  enforceMinTotalGaps?: boolean;
+  minTotalGaps?: number;
+  minTotalGapsLevel?: 'off' | 'low' | 'medium' | 'high';
+  minTotalGapsPenalty?: number;
+  gapExemptTeacherIds?: string[];
+  enforceHourlyReserve?: boolean;
+  minHourlyReserveTeachers?: number;
+  hourlyReserveLevel?: 'off' | 'low' | 'medium' | 'high';
+  hourlyReservePenalty?: number;
+  enforceCategoricalFairness?: boolean;
+  enforceMinActiveDays?: boolean;
+  minActiveDays?: number;
+  minActiveDaysLevel?: 'off' | 'low' | 'medium' | 'high';
+  minActiveDaysPenalty?: number;
+  minDaysExemptTeacherIds?: string[];
+  enforceMaxGaps?: boolean;
+  maxGapsPerDay?: number;
   enforceDailyBalance: boolean;
   minDailyHours: number;
   enforceConsecutiveClassRules: boolean;

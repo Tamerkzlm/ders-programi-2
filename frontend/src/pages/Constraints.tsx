@@ -1,5 +1,5 @@
 // frontend/src/pages/Constraints.jsx
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -7,6 +7,7 @@ import {
   Save, 
   CheckCircle, 
   Clock, 
+  Coffee,
   Scale, 
   Layers, 
   BookOpen, 
@@ -15,8 +16,14 @@ import {
   RotateCcw,
   Info,
   ShieldCheck,
+  ShieldAlert,
   Zap,
-  ArrowRight
+  ArrowRight,
+  Baby,
+  Search,
+  X,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import CapacityHeatmap from '../components/common/CapacityHeatmap';
 
@@ -26,8 +33,25 @@ export default function Constraints() {
 
   // Sert ve yumuşak kısıtların yerel durumu
   const [hard, setHard] = useState({
-    enforceMaxGaps: hardPrefs?.enforceMaxGaps ?? true,
-    maxGapsPerDay: hardPrefs?.maxGapsPerDay ?? 2,
+    enforceMaxTotalGaps: hardPrefs?.enforceMaxTotalGaps ?? true,
+    maxTotalGaps: hardPrefs?.maxTotalGaps ?? 4,
+    maxTotalGapsLevel: hardPrefs?.maxTotalGapsLevel ?? (hardPrefs?.enforceMaxTotalGaps === false ? 'off' : 'medium'),
+    maxTotalGapsPenalty: hardPrefs?.maxTotalGapsPenalty ?? 60,
+    enforceMinTotalGaps: hardPrefs?.enforceMinTotalGaps ?? false,
+    minTotalGaps: hardPrefs?.minTotalGaps ?? 0,
+    minTotalGapsLevel: hardPrefs?.minTotalGapsLevel ?? 'off',
+    minTotalGapsPenalty: hardPrefs?.minTotalGapsPenalty ?? 0,
+    gapExemptTeacherIds: hardPrefs?.gapExemptTeacherIds ?? [],
+    enforceHourlyReserve: hardPrefs?.enforceHourlyReserve ?? false,
+    minHourlyReserveTeachers: hardPrefs?.minHourlyReserveTeachers ?? 1,
+    hourlyReserveLevel: hardPrefs?.hourlyReserveLevel ?? 'off',
+    hourlyReservePenalty: hardPrefs?.hourlyReservePenalty ?? 0,
+    enforceCategoricalFairness: hardPrefs?.enforceCategoricalFairness ?? true,
+    enforceMinActiveDays: hardPrefs?.enforceMinActiveDays ?? true,
+    minActiveDays: hardPrefs?.minActiveDays ?? 4,
+    minActiveDaysLevel: hardPrefs?.minActiveDaysLevel ?? 'high',
+    minActiveDaysPenalty: hardPrefs?.minActiveDaysPenalty ?? 100,
+    minDaysExemptTeacherIds: hardPrefs?.minDaysExemptTeacherIds ?? [],
     enforceDailyBalance: hardPrefs?.enforceDailyBalance ?? true,
     minDailyHours: hardPrefs?.minDailyHours ?? 3,
     enforceConsecutiveClassRules: hardPrefs?.enforceConsecutiveClassRules ?? true,
@@ -43,11 +67,263 @@ export default function Constraints() {
     earlyStart: softPrefs?.earlyStart ?? true,
     earlyStartPenalty: softPrefs?.earlyStartPenalty ?? 20,
     avoidStemLate: softPrefs?.avoidStemLate ?? true,
-    stemLatePenalty: softPrefs?.stemLatePenalty ?? 35
+    stemLatePenalty: softPrefs?.stemLatePenalty ?? 35,
+    maxTotalGapsLevel: softPrefs?.maxTotalGapsLevel ?? 'medium',
+    maxTotalGapsPenalty: softPrefs?.maxTotalGapsPenalty ?? 60,
+    minTotalGapsLevel: softPrefs?.minTotalGapsLevel ?? 'off',
+    minTotalGapsPenalty: softPrefs?.minTotalGapsPenalty ?? 0,
+    hourlyReserveLevel: softPrefs?.hourlyReserveLevel ?? 'off',
+    hourlyReservePenalty: softPrefs?.hourlyReservePenalty ?? 0,
+    minActiveDaysLevel: softPrefs?.minActiveDaysLevel ?? 'high',
+    minActiveDaysPenalty: softPrefs?.minActiveDaysPenalty ?? 100,
+    minDaysExemptTeacherIds: softPrefs?.minDaysExemptTeacherIds ?? []
   });
 
   const [activeTab, setActiveTab] = useState('all'); // 'all', 'teacher', 'pedagogic', 'solver'
   const [saved, setSaved] = useState(false);
+
+  // --- MODEL C: ÖN-SİMÜLASYON VE İSTİSNA ÖĞRETMEN YÖNETİMİ ---
+  const [showExemptModal, setShowExemptModal] = useState(false);
+  const [exemptSearch, setExemptSearch] = useState('');
+  const [showMinDaysExemptModal, setShowMinDaysExemptModal] = useState(false);
+  const [minDaysExemptSearch, setMinDaysExemptSearch] = useState('');
+
+  const days = settings?.days || ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"];
+  const numPeriods = Number(settings?.periodsPerDay) || 7;
+  const totalSlots = days.length * numPeriods;
+
+  const teacherLoads = useMemo(() => {
+    const loads: Record<string, number> = {};
+    (classrooms || []).forEach(c => {
+      (c.courses || []).forEach(co => {
+        if (co.teacherId) {
+          loads[co.teacherId] = (loads[co.teacherId] || 0) + (Number(co.hoursPerWeek) || 0);
+        }
+      });
+    });
+    return loads;
+  }, [classrooms]);
+
+  const teacherAnalysis = useMemo(() => {
+    const targetMin = hard.minTotalGaps || 3;
+    const userExemptIds = new Set(hard.gapExemptTeacherIds || []);
+
+    const userExemptList: any[] = [];
+    const capacityExemptList: any[] = [];
+    const guaranteedList: any[] = [];
+
+    (teachers || []).forEach(t => {
+      const load = teacherLoads[t.id] || 0;
+      if (load <= 0) return;
+      const closedCount = Object.values(t.unavailable || {}).reduce((acc: number, curr: any) => acc + (curr?.length || 0), 0);
+      const openCount = totalSlots - closedCount;
+      const margin = Math.max(0, openCount - load);
+
+      const isUserExempt = userExemptIds.has(t.id) || Boolean(t.isExempt);
+      const isCapacityExempt = !isUserExempt && margin < targetMin;
+
+      const info = {
+        ...t,
+        load,
+        openCount,
+        closedCount,
+        margin,
+        isUserExempt,
+        isCapacityExempt
+      };
+
+      if (isUserExempt) {
+        userExemptList.push(info);
+      } else if (isCapacityExempt) {
+        capacityExemptList.push(info);
+      } else {
+        guaranteedList.push(info);
+      }
+    });
+
+    return {
+      userExemptList,
+      capacityExemptList,
+      guaranteedList
+    };
+  }, [teachers, teacherLoads, totalSlots, hard.minTotalGaps, hard.gapExemptTeacherIds]);
+
+  // ⚖️ KATEGORİK ADALET MATRİSİ ANALİZİ (DERS YÜKÜ × BOŞ SLOT)
+  const categoricalAnalysis = useMemo(() => {
+    const userExemptIds = new Set(hard.gapExemptTeacherIds || []);
+    const cat1: any[] = []; // M <= 2 -> 0-1s
+    const cat2: any[] = []; // L < 25 & 3 <= M <= 5 -> 1-2s
+    const cat3: any[] = []; // L >= 25 & M >= 3 -> 1-2s (M<=5) / 1-3s (M>=6)
+    const cat4: any[] = []; // L < 25 & M >= 6 -> 1-3s
+    const excluded: any[] = []; // İdareciler ve istisnalar
+
+    (teachers || []).forEach(t => {
+      const load = teacherLoads[t.id] || 0;
+      if (load <= 0) return;
+      const openDays = days.filter(d => (t.unavailable?.[d] || []).length < numPeriods).length;
+      const closedCount = Object.values(t.unavailable || {}).reduce((acc: number, curr: any) => acc + (curr?.length || 0), 0);
+      const openCount = totalSlots - closedCount;
+      const freeSlots = Math.max(0, openCount - load);
+      const isPartTime = (openDays <= 2 && load < 17) || (Boolean(t.isExempt) && load < 17);
+      const isExempt = Boolean(t.isExempt) || load <= 8 || isPartTime || Boolean(t.isAdministrator) || userExemptIds.has(t.id);
+
+      const item = { ...t, load, openCount, freeSlots };
+      if (t.isAdministrator || isExempt) {
+        excluded.push(item);
+      } else if (freeSlots <= 2) {
+        cat1.push({ ...item, targetRange: `0–${Math.min(1, freeSlots)}s` });
+      } else if (load < 25 && freeSlots <= 5) {
+        cat2.push({ ...item, targetRange: '1–2s' });
+      } else if (load >= 25) {
+        cat3.push({ ...item, targetRange: freeSlots <= 5 ? '1–2s' : '1–3s' });
+      } else {
+        cat4.push({ ...item, targetRange: '1–3s' });
+      }
+    });
+
+    return { cat1, cat2, cat3, cat4, excluded };
+  }, [teachers, teacherLoads, days, numPeriods, totalSlots, hard.gapExemptTeacherIds]);
+
+  const toggleTeacherGapExemption = (teacherId: string) => {
+    const current = hard.gapExemptTeacherIds || [];
+    const next = current.includes(teacherId)
+      ? current.filter(id => id !== teacherId)
+      : [...current, teacherId];
+    setHard(prev => ({ ...prev, gapExemptTeacherIds: next }));
+  };
+
+  // 📅 HAFTALIK ASGARİ DERS GÜNÜ GÜVENCESİ (İSTİSNA DIŞINDA 3 GÜN VE ALTINDA DERS VERMEME) ANALİZİ
+  const minActiveDaysAnalysis = useMemo(() => {
+    const targetDays = hard.minActiveDays || 4;
+    const userMinDaysExempt = new Set(hard.minDaysExemptTeacherIds || []);
+
+    const guaranteed: any[] = [];
+    const capacityExempt: any[] = [];
+    const statusExempt: any[] = [];
+
+    (teachers || []).forEach(t => {
+      const load = teacherLoads[t.id] || 0;
+      if (load <= 0) return;
+      const openDays = days.filter(d => (t.unavailable?.[d] || []).length < numPeriods).length;
+      const isPartTime = (openDays <= 2 && load < 17) || (Boolean(t.isExempt) && load < 17);
+      const fDay = t.floatingConstraints?.freeDayPreference || 'none';
+      const isStatusExempt =
+        Boolean(t.isAdministrator) ||
+        Boolean(t.isExempt) ||
+        load <= 8 ||
+        isPartTime ||
+        fDay === 'floating_2_days' ||
+        userMinDaysExempt.has(t.id);
+
+      const maxPossibleDays = Math.min(openDays, Math.max(1, Math.floor(load / 2)));
+      const item = { ...t, load, openDays, maxPossibleDays };
+
+      if (isStatusExempt) {
+        statusExempt.push(item);
+      } else if (maxPossibleDays < targetDays) {
+        capacityExempt.push(item);
+      } else {
+        guaranteed.push(item);
+      }
+    });
+
+    return { guaranteed, capacityExempt, statusExempt };
+  }, [teachers, teacherLoads, days, numPeriods, hard.minActiveDays, hard.minDaysExemptTeacherIds]);
+
+  const toggleTeacherMinDaysExemption = (teacherId: string) => {
+    const current = hard.minDaysExemptTeacherIds || [];
+    const next = current.includes(teacherId)
+      ? current.filter(id => id !== teacherId)
+      : [...current, teacherId];
+    setHard(prev => ({ ...prev, minDaysExemptTeacherIds: next }));
+    setSoft(prev => ({ ...prev, minDaysExemptTeacherIds: next }));
+  };
+
+  const getMinActiveDaysLevel = () => {
+    if (hard.enforceMinActiveDays === false || hard.minActiveDaysLevel === 'off' || (hard.minActiveDays ?? 4) <= 0) return 'off';
+    return hard.minActiveDaysLevel || 'high';
+  };
+
+  const setMinActiveDaysLevel = (level: string) => {
+    if (level === 'off') {
+      setHard(prev => ({ ...prev, enforceMinActiveDays: false, minActiveDaysLevel: 'off', minActiveDaysPenalty: 0 }));
+      setSoft(prev => ({ ...prev, minActiveDaysLevel: 'off', minActiveDaysPenalty: 0 }));
+    } else if (level === 'low') {
+      setHard(prev => ({ ...prev, enforceMinActiveDays: true, minActiveDays: prev.minActiveDays || 4, minActiveDaysLevel: 'low', minActiveDaysPenalty: 30 }));
+      setSoft(prev => ({ ...prev, minActiveDaysLevel: 'low', minActiveDaysPenalty: 30 }));
+    } else if (level === 'medium') {
+      setHard(prev => ({ ...prev, enforceMinActiveDays: true, minActiveDays: prev.minActiveDays || 4, minActiveDaysLevel: 'medium', minActiveDaysPenalty: 80 }));
+      setSoft(prev => ({ ...prev, minActiveDaysLevel: 'medium', minActiveDaysPenalty: 80 }));
+    } else if (level === 'high') {
+      setHard(prev => ({ ...prev, enforceMinActiveDays: true, minActiveDays: prev.minActiveDays || 4, minActiveDaysLevel: 'high', minActiveDaysPenalty: 1000 }));
+      setSoft(prev => ({ ...prev, minActiveDaysLevel: 'high', minActiveDaysPenalty: 1000 }));
+    }
+  };
+
+  // Haftalık toplam maksimum pencere seviyesi ve ceza puanı yönetimi
+  const getMaxTotalGapsLevel = () => {
+    if (hard.enforceMaxTotalGaps === false || hard.maxTotalGapsLevel === 'off') return 'off';
+    return hard.maxTotalGapsLevel || 'medium';
+  };
+
+  const setMaxTotalGapsLevel = (level: string) => {
+    if (level === 'off') {
+      setHard((prev) => ({ ...prev, enforceMaxTotalGaps: false, maxTotalGapsLevel: 'off', maxTotalGapsPenalty: 0 }));
+      setSoft((prev) => ({ ...prev, maxTotalGapsLevel: 'off', maxTotalGapsPenalty: 0 }));
+    } else if (level === 'low') {
+      setHard((prev) => ({ ...prev, enforceMaxTotalGaps: true, maxTotalGapsLevel: 'low', maxTotalGapsPenalty: 20 }));
+      setSoft((prev) => ({ ...prev, maxTotalGapsLevel: 'low', maxTotalGapsPenalty: 20 }));
+    } else if (level === 'medium') {
+      setHard((prev) => ({ ...prev, enforceMaxTotalGaps: true, maxTotalGapsLevel: 'medium', maxTotalGapsPenalty: 60 }));
+      setSoft((prev) => ({ ...prev, maxTotalGapsLevel: 'medium', maxTotalGapsPenalty: 60 }));
+    } else if (level === 'high') {
+      setHard((prev) => ({ ...prev, enforceMaxTotalGaps: true, maxTotalGapsLevel: 'high', maxTotalGapsPenalty: 1000 }));
+      setSoft((prev) => ({ ...prev, maxTotalGapsLevel: 'high', maxTotalGapsPenalty: 1000 }));
+    }
+  };
+
+  // Haftalık toplam minimum pencere seviyesi ve ceza puanı yönetimi
+  const getMinTotalGapsLevel = () => {
+    return hard.minTotalGapsLevel || 'off';
+  };
+
+  const setMinTotalGapsLevel = (level: string) => {
+    if (level === 'off') {
+      setHard((prev) => ({ ...prev, enforceMinTotalGaps: false, minTotalGapsLevel: 'off', minTotalGapsPenalty: 0 }));
+      setSoft((prev) => ({ ...prev, minTotalGapsLevel: 'off', minTotalGapsPenalty: 0 }));
+    } else if (level === 'low') {
+      setHard((prev) => ({ ...prev, enforceMinTotalGaps: true, minTotalGapsLevel: 'low', minTotalGapsPenalty: 20, minTotalGaps: prev.minTotalGaps || 1 }));
+      setSoft((prev) => ({ ...prev, minTotalGapsLevel: 'low', minTotalGapsPenalty: 20 }));
+    } else if (level === 'medium') {
+      setHard((prev) => ({ ...prev, enforceMinTotalGaps: true, minTotalGapsLevel: 'medium', minTotalGapsPenalty: 60, minTotalGaps: prev.minTotalGaps || 1 }));
+      setSoft((prev) => ({ ...prev, minTotalGapsLevel: 'medium', minTotalGapsPenalty: 60 }));
+    } else if (level === 'high') {
+      setHard((prev) => ({ ...prev, enforceMinTotalGaps: true, minTotalGapsLevel: 'high', minTotalGapsPenalty: 1000, minTotalGaps: prev.minTotalGaps || 1 }));
+      setSoft((prev) => ({ ...prev, minTotalGapsLevel: 'high', minTotalGapsPenalty: 1000 }));
+    }
+  };
+
+  // Saatlik yedek / nöbetçi öğretmen güvencesi (ilk ve son saat hariç ara saatler: 2..P-1)
+  const getHourlyReserveLevel = () => {
+    if (!hard.enforceHourlyReserve || hard.hourlyReserveLevel === 'off') return 'off';
+    return hard.hourlyReserveLevel || 'off';
+  };
+
+  const setHourlyReserveLevel = (level: string) => {
+    if (level === 'off') {
+      setHard((prev) => ({ ...prev, enforceHourlyReserve: false, hourlyReserveLevel: 'off', hourlyReservePenalty: 0 }));
+      setSoft((prev) => ({ ...prev, hourlyReserveLevel: 'off', hourlyReservePenalty: 0 }));
+    } else if (level === 'low') {
+      setHard((prev) => ({ ...prev, enforceHourlyReserve: true, hourlyReserveLevel: 'low', hourlyReservePenalty: 20, minHourlyReserveTeachers: prev.minHourlyReserveTeachers || 1 }));
+      setSoft((prev) => ({ ...prev, hourlyReserveLevel: 'low', hourlyReservePenalty: 20 }));
+    } else if (level === 'medium') {
+      setHard((prev) => ({ ...prev, enforceHourlyReserve: true, hourlyReserveLevel: 'medium', hourlyReservePenalty: 60, minHourlyReserveTeachers: prev.minHourlyReserveTeachers || 1 }));
+      setSoft((prev) => ({ ...prev, hourlyReserveLevel: 'medium', hourlyReservePenalty: 60 }));
+    } else if (level === 'high') {
+      setHard((prev) => ({ ...prev, enforceHourlyReserve: true, hourlyReserveLevel: 'high', hourlyReservePenalty: 1000, minHourlyReserveTeachers: prev.minHourlyReserveTeachers || 1 }));
+      setSoft((prev) => ({ ...prev, hourlyReserveLevel: 'high', hourlyReservePenalty: 1000 }));
+    }
+  };
 
   // Ceza katsayılarını 4 kademeli sezgisel seviyeye çevirici
   const getEarlyStartLevel = () => {
@@ -97,8 +373,25 @@ export default function Constraints() {
 
   const handleResetDefaults = () => {
     const defaultHard = {
-      enforceMaxGaps: true,
-      maxGapsPerDay: 2,
+      enforceMaxTotalGaps: true,
+      maxTotalGaps: 4,
+      maxTotalGapsLevel: 'medium' as const,
+      maxTotalGapsPenalty: 60,
+      enforceMinTotalGaps: false,
+      minTotalGaps: 0,
+      minTotalGapsLevel: 'off' as const,
+      minTotalGapsPenalty: 0,
+      gapExemptTeacherIds: [],
+      enforceHourlyReserve: false,
+      minHourlyReserveTeachers: 1,
+      hourlyReserveLevel: 'off' as const,
+      hourlyReservePenalty: 0,
+      enforceCategoricalFairness: true,
+      enforceMinActiveDays: true,
+      minActiveDays: 4,
+      minActiveDaysLevel: 'high' as const,
+      minActiveDaysPenalty: 100,
+      minDaysExemptTeacherIds: [],
       enforceDailyBalance: true,
       minDailyHours: 3,
       enforceConsecutiveClassRules: true,
@@ -113,7 +406,16 @@ export default function Constraints() {
       earlyStart: true,
       earlyStartPenalty: 20,
       avoidStemLate: true,
-      stemLatePenalty: 35
+      stemLatePenalty: 35,
+      maxTotalGapsLevel: 'medium' as const,
+      maxTotalGapsPenalty: 60,
+      minTotalGapsLevel: 'off' as const,
+      minTotalGapsPenalty: 0,
+      hourlyReserveLevel: 'off' as const,
+      hourlyReservePenalty: 0,
+      minActiveDaysLevel: 'high' as const,
+      minActiveDaysPenalty: 100,
+      minDaysExemptTeacherIds: []
     };
     setHard(defaultHard);
     setSoft(defaultSoft);
@@ -268,66 +570,525 @@ export default function Constraints() {
 
           <div className="grid grid-cols-1 gap-4">
             
-            {/* KURAL 1.1: GÜNLÜK PENCERE SINIRI */}
+            {/* KURAL 1.1: HAFTALIK TOPLAM MAKSİMUM PENCERE SINIRI & ÖNCELİK KADEMESİ */}
             <div className="bg-white border border-gray-200 rounded-2xl shadow-xs overflow-hidden">
               <div className="p-4 sm:p-5 border-b border-gray-100 bg-gray-50/60 flex justify-between items-start gap-4">
                 <div className="space-y-1">
                   <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
                     <Clock size={16} className="text-blue-600 shrink-0" />
-                    Öğretmen Günlük Maksimum Pencere (Boşluk) Sınırı
+                    Öğretmen Haftalık Toplam Maksimum Pencere (Boşluk) Sınırı
                   </h3>
                   <p className="text-xs text-gray-500">
-                    Bir öğretmenin gün içindeki dersleri arasında kalabilecek azami boş saat sınırıdır.
+                    Bir öğretmenin hafta genelinde (tüm günlerin toplamında) sahip olabileceği azami boş ders saati sınırıdır.
                   </p>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                  <input 
-                    type="checkbox" 
-                    className="sr-only peer" 
-                    checked={hard.enforceMaxGaps} 
-                    onChange={(e) => setHard({ ...hard, enforceMaxGaps: e.target.checked })} 
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                </label>
               </div>
 
-              {hard.enforceMaxGaps ? (
-                <div className="p-4 sm:p-5 bg-white flex flex-wrap items-center gap-3">
-                  <span className="text-xs font-bold text-gray-700">İzin Verilen Günlük Azami Boşluk:</span>
+              <div className="p-4 sm:p-5 bg-white space-y-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-xs font-bold text-gray-700">İzin Verilen Haftalık Azami Pencere:</span>
                   <div className="flex items-center gap-1.5">
-                    {[1, 2, 3].map((val) => (
+                    {[0, 2, 4, 6, 8].map((val) => (
                       <button
                         key={val}
                         type="button"
-                        onClick={() => setHard({ ...hard, maxGapsPerDay: val })}
+                        onClick={() => {
+                          const newHard = { ...hard, maxTotalGaps: val };
+                          if ((newHard.minTotalGaps ?? 0) > val) {
+                            newHard.minTotalGaps = val;
+                          }
+                          setHard(newHard);
+                        }}
                         className={`px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-all ${
-                          hard.maxGapsPerDay === val 
+                          hard.maxTotalGaps === val 
                             ? 'bg-blue-600 text-white border-blue-600 shadow-xs' 
                             : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
                         }`}
                       >
-                        {val} Saat {val === 2 && '(Önerilen)'}
+                        {val === 0 ? '0 Saat (Sıfır Boşluk)' : `${val} Saat`} {val === 4 && '(Önerilen)'}
                       </button>
                     ))}
                   </div>
                 </div>
-              ) : (
-                <div className="p-4 bg-amber-50/60 text-amber-900 text-xs font-medium">
-                  ⚠️ Bu sınır devre dışı. Motor boşlukları en aza indirmeye çalışır ancak kilitlenme durumunda daha geniş pencerelere izin verir.
+
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-xs font-bold text-gray-700 block">Kural Önceliği & Ceza Seviyesi:</label>
+                  <PriorityBadges
+                    currentLevel={getMaxTotalGapsLevel()}
+                    onChange={setMaxTotalGapsLevel}
+                    labels={{
+                      off: '⚪ Kapalı',
+                      low: '🟡 Düşük Öncelik',
+                      medium: '🔵 Dengeli (Önerilen)',
+                      high: '🟣 Tavizsiz Sınır'
+                    }}
+                  />
                 </div>
-              )}
+
+                <div className="text-xs pt-1">
+                  {getMaxTotalGapsLevel() === 'off' ? (
+                    <div className="p-3 bg-amber-50/60 rounded-xl text-amber-900 font-medium">
+                      ⚠️ Bu sınır devre dışı. Motor haftalık toplam boşlukları sınırlandırmaz; dersler günlere serbestçe yayılabilir.
+                    </div>
+                  ) : getMaxTotalGapsLevel() === 'high' ? (
+                    <div className="p-3 bg-purple-50 rounded-xl text-purple-950 font-bold border border-purple-200 flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-purple-600 shrink-0" />
+                      <span>Tavizsiz Sert Kısıt: Çözücü hiçbir öğretmene hafta boyunca toplam {hard.maxTotalGaps} saatten fazla pencere veremez; program bu sınır korunarak üretilir.</span>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-gray-500">
+                      💡 Dengeli modda motor öğretmenlerin haftalık toplam boşluklarını {hard.maxTotalGaps} saat altında tutmaya çalışır; kilitlenme ve kapalı saat darboğazlarında hafif esnemeye izin verir.
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {/* KURAL 1.2: GÜNLÜK DERS DAĞILIM DENGESİ & BOŞ GÜN GÜVENCESİ */}
+            {/* KURAL 1.2: HAFTALIK TOPLAM ASGARİ (MİNİMUM) BOŞ DERS & PROJE SINIRI */}
+            <div className="bg-white border border-gray-200 rounded-2xl shadow-xs overflow-hidden">
+              <div className="p-4 sm:p-5 border-b border-gray-100 bg-gray-50/60 flex justify-between items-start gap-4">
+                <div className="space-y-1">
+                  <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                    <Coffee size={16} className="text-blue-600 shrink-0" />
+                    Öğretmen Haftalık Asgari Boş Ders & Proje Saati Sınırı
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Öğretmenlerin okulda proje, zümre, veli görüşmesi ve ders hazırlığı yapabilmeleri için hafta genelinde en az belirli bir toplam boş saate (pencereye) sahip olmasını sağlar.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 sm:p-5 bg-white space-y-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-xs font-bold text-gray-700">İstenen Haftalık Asgari Boşluk:</span>
+                  <div className="flex items-center gap-1.5">
+                    {[0, 1, 2, 3, 4, 5].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => {
+                          const newHard = { ...hard, minTotalGaps: val };
+                          if (val > (hard.maxTotalGaps ?? 4)) {
+                            newHard.maxTotalGaps = Math.max(val, 6);
+                          }
+                          if (val > 0 && getMinTotalGapsLevel() === 'off') {
+                            newHard.minTotalGapsLevel = 'medium';
+                            newHard.minTotalGapsPenalty = 60;
+                            newHard.enforceMinTotalGaps = true;
+                          } else if (val === 0) {
+                            newHard.minTotalGapsLevel = 'off';
+                            newHard.minTotalGapsPenalty = 0;
+                            newHard.enforceMinTotalGaps = false;
+                          }
+                          setHard(newHard);
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-all ${
+                          (hard.minTotalGaps ?? 0) === val 
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs' 
+                            : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        {val === 0 ? '0 Saat (Boşluksuz Serbest)' : `${val} Saat`} {val === 0 && '(Standart)'} {val === 3 && '(Önerilen Proje/Dinlenme)'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-xs font-bold text-gray-700 block">Kural Önceliği & Ceza Seviyesi:</label>
+                  <PriorityBadges
+                    currentLevel={getMinTotalGapsLevel()}
+                    onChange={setMinTotalGapsLevel}
+                    labels={{
+                      off: '⚪ Kapalı (Boşluksuz Serbest)',
+                      low: '🟡 Düşük Öncelik',
+                      medium: '🔵 Dengeli',
+                      high: '🟣 Tavizsiz Asgari Boşluk'
+                    }}
+                  />
+                </div>
+
+                <div className="text-xs pt-1">
+                  {getMinTotalGapsLevel() === 'off' ? (
+                    <div className="p-3 bg-gray-50 rounded-xl text-gray-600 font-medium">
+                      ✓ Kapalı: Öğretmenin haftalık tüm dersleri tamamen bitişik yerleşebilir (haftalık asgari boşluk zorunluluğu aranmaz).
+                    </div>
+                  ) : getMinTotalGapsLevel() === 'high' ? (
+                    <div className="space-y-2">
+                      <div className="p-3 bg-purple-50 rounded-xl text-purple-950 font-bold border border-purple-200 flex items-center gap-2">
+                        <ShieldCheck size={16} className="text-purple-600 shrink-0" />
+                        <span>Tavizsiz Asgari Boşluk: Açık saat kapasitesi uygun olan öğretmenlere hafta genelinde KESİNLİKLE en az {hard.minTotalGaps || 3} saat proje/dinlenme boşluğu garanti edilir.</span>
+                      </div>
+                      <div className="p-2.5 bg-blue-50/70 rounded-xl text-blue-900 text-[11px] border border-blue-100 flex items-center gap-2">
+                        <span>💡 <strong>Akıllı Kapasite Koruması:</strong> Ders yükü okulda bulunduğu açık saatleri dolduran öğretmenler (ör. 21 saat dersi olup 2 gün kapalı olanlar), program kilitlenmesini önlemek için bu kuraldan makul muaf tutulur; diğer tüm öğretmenler tavizsiz olarak bu boşluğa sahip olur.</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-gray-500">
+                      💡 Dengeli modda motor, haftalık ders yükü olan öğretmenlere hafta boyunca en az {hard.minTotalGaps || 1} saat dinlenme/proje boşluğu bırakmayı hedefler; kilitlenme durumunda esnemeye izin verir.
+                    </div>
+                  )}
+                </div>
+
+                {/* 🛡️ MODEL C: ÖN-SİMÜLASYON & TAVİZSİZ GÜVENCESİ PANELİ */}
+                <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-xs font-black text-gray-900 flex items-center gap-1.5 uppercase tracking-wider">
+                      <Zap size={14} className="text-amber-500 fill-amber-500" />
+                      Model C: Ön-Simülasyon & Sıfır Taviz Güvencesi
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowExemptModal(!showExemptModal)}
+                      className="px-2.5 py-1 text-xs font-bold bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Baby size={13} className="text-amber-700" />
+                      <span>İstisna / Süt İzni Öğretmen Yönetimi ({teacherAnalysis.userExemptList.length} Seçili)</span>
+                      {showExemptModal ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                  </div>
+
+                  {/* 3 Kademeli Canlı Gösterge Kartları */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                    <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl">
+                      <div className="flex items-center justify-between font-bold text-emerald-950">
+                        <span className="flex items-center gap-1">
+                          <ShieldCheck size={14} className="text-emerald-600" />
+                          Tavizsiz Garanti
+                        </span>
+                        <span className="text-sm font-black px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded">
+                          {teacherAnalysis.guaranteedList.length} Öğretmen
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-emerald-800/80 mt-1">
+                        Açık saat kapasitesi uygun; kural %100 sert kısıtla kesin korunur (0 esnetme).
+                      </p>
+                    </div>
+
+                    <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-xl">
+                      <div className="flex items-center justify-between font-bold text-amber-950">
+                        <span className="flex items-center gap-1">
+                          <Baby size={14} className="text-amber-600" />
+                          Kullanıcı İstisnası
+                        </span>
+                        <span className="text-sm font-black px-1.5 py-0.5 bg-amber-100 text-amber-900 rounded">
+                          {teacherAnalysis.userExemptList.length} Öğretmen
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-amber-800/80 mt-1">
+                        Süt izni / idareci / özel durum; esnek yerleşimle program kilitlenmez.
+                      </p>
+                    </div>
+
+                    <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                      <div className="flex items-center justify-between font-bold text-slate-800">
+                        <span className="flex items-center gap-1">
+                          <ShieldAlert size={14} className="text-slate-500" />
+                          Kapasite Muafiyeti
+                        </span>
+                        <span className="text-sm font-black px-1.5 py-0.5 bg-slate-200 text-slate-800 rounded">
+                          {teacherAnalysis.capacityExemptList.length} Öğretmen
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 mt-1">
+                        Ders yükü açık saatleri dolduranlar ({teacherAnalysis.capacityExemptList.map(t => t.name).join(', ') || 'Yok'}); otomatik muaf.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* İstisna Öğretmen Seçim Listesi (Açılır Panel) */}
+                  {showExemptModal && (
+                    <div className="p-3 bg-amber-50/40 border border-amber-200 rounded-xl space-y-2.5 animate-fadeIn">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="text-[11px] font-bold text-amber-950 flex items-center gap-1">
+                          <Baby size={13} className="text-amber-700 shrink-0" />
+                          <span>Süt İzni, Nöbetçi İdareci veya Özel Durumu Olan Öğretmenleri İşaretleyin:</span>
+                        </div>
+                        <div className="relative w-44">
+                          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input
+                            type="text"
+                            value={exemptSearch}
+                            onChange={(e) => setExemptSearch(e.target.value)}
+                            placeholder="Öğretmen ara..."
+                            className="w-full pl-7 pr-2 py-1 text-xs border border-amber-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="max-h-48 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                        {(teachers || [])
+                          .filter(t => !exemptSearch || t.name.toLowerCase().includes(exemptSearch.toLowerCase()) || t.branch?.toLowerCase().includes(exemptSearch.toLowerCase()))
+                          .map(t => {
+                            const isSelected = (hard.gapExemptTeacherIds || []).includes(t.id);
+                            const load = teacherLoads[t.id] || 0;
+                            const closedCount = Object.values(t.unavailable || {}).reduce((acc: number, curr: any) => acc + (curr?.length || 0), 0);
+                            const openCount = totalSlots - closedCount;
+                            const margin = Math.max(0, openCount - load);
+
+                            return (
+                              <div
+                                key={t.id}
+                                onClick={() => toggleTeacherGapExemption(t.id)}
+                                className={`px-2.5 py-1.5 rounded-lg border text-xs flex items-center justify-between cursor-pointer transition-all ${
+                                  isSelected
+                                    ? 'bg-amber-100/80 border-amber-300 font-bold text-amber-950'
+                                    : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => {}} // handled by div
+                                    className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                                  />
+                                  <span className="truncate">{t.name}</span>
+                                  <span className="text-[10px] text-gray-400">({t.branch || 'Genel'})</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] text-gray-500 shrink-0">
+                                  <span>Yük: {load}s</span>
+                                  <span>Açık: {openCount}s</span>
+                                  <span className={`font-bold ${margin < (hard.minTotalGaps || 3) ? 'text-rose-600' : 'text-emerald-700'}`}>Boşluk: {margin}s</span>
+                                  {isSelected && (
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 font-bold text-[9px]">
+                                      İstisna
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+
+                      {/* Seçili İstisna Rozetleri */}
+                      {(hard.gapExemptTeacherIds || []).length > 0 && (
+                        <div className="pt-2 border-t border-amber-200/60 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-amber-900">Seçilen İstisnalar:</span>
+                          {(hard.gapExemptTeacherIds || []).map(id => {
+                            const tObj = (teachers || []).find(t => t.id === id);
+                            if (!tObj) return null;
+                            return (
+                              <span
+                                key={id}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-200/90 text-amber-950 rounded-md text-[10px] font-bold"
+                              >
+                                <span>{tObj.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleTeacherGapExemption(id);
+                                  }}
+                                  className="hover:text-red-700 cursor-pointer"
+                                >
+                                  <X size={10} />
+                                </button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* KURAL 1.3: SAATLİK YEDEK / NÖBETÇİ ÖĞRETMEN GÜVENCESİ (İLK VE SON SAAT HARİÇ ARA SAATLER) */}
+            <div className="bg-white border border-gray-200 rounded-2xl shadow-xs overflow-hidden">
+              <div className="p-4 sm:p-5 border-b border-gray-100 bg-gray-50/60 flex justify-between items-start gap-4">
+                <div className="space-y-1">
+                  <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                    <ShieldCheck size={16} className="text-blue-600 shrink-0" />
+                    Saatlik Yedek / Nöbetçi Öğretmen Güvencesi (2. – {Math.max(2, numPeriods - 1)}. Saatler)
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Okulun ilk (1.) ve son ({numPeriods}.) ders saati hariç tüm ara ders saatlerinde, <strong>idareciler ve istisna öğretmenler sayılmadan</strong> en az belirli sayıda tam zamanlı öğretmenin okulda boş dersinin (penceresinin) olmasını garanti eder.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 sm:p-5 bg-white space-y-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-xs font-bold text-gray-700">Her Ara Saatte (2..{Math.max(2, numPeriods - 1)}) Boş Olacak Asgari Öğretmen:</span>
+                  <div className="flex items-center gap-1.5">
+                    {[0, 1, 2, 3].map((val) => {
+                      const activeVal = getHourlyReserveLevel() === 'off' ? 0 : (hard.minHourlyReserveTeachers ?? 1);
+                      return (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => {
+                            if (val === 0) {
+                              setHourlyReserveLevel('off');
+                              setHard(prev => ({ ...prev, enforceHourlyReserve: false, minHourlyReserveTeachers: 0, hourlyReserveLevel: 'off', hourlyReservePenalty: 0 }));
+                            } else {
+                              const currentLvl = getHourlyReserveLevel();
+                              const nextLvl = currentLvl === 'off' ? 'high' : currentLvl;
+                              const nextPen = nextLvl === 'high' ? 1000 : nextLvl === 'medium' ? 60 : 20;
+                              setHard(prev => ({
+                                ...prev,
+                                enforceHourlyReserve: true,
+                                minHourlyReserveTeachers: val,
+                                hourlyReserveLevel: nextLvl,
+                                hourlyReservePenalty: nextPen
+                              }));
+                              setSoft(prev => ({
+                                ...prev,
+                                hourlyReserveLevel: nextLvl,
+                                hourlyReservePenalty: nextPen
+                              }));
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-all ${
+                            activeVal === val
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                              : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                          }`}
+                        >
+                          {val === 0 ? 'Kapalı (0)' : `En Az ${val} Öğretmen`} {val === 1 && '(Önerilen)'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-xs font-bold text-gray-700 block">Kural Önceliği & Ceza Seviyesi:</label>
+                  <PriorityBadges
+                    currentLevel={getHourlyReserveLevel()}
+                    onChange={setHourlyReserveLevel}
+                    labels={{
+                      off: '⚪ Kapalı',
+                      low: '🟡 Düşük Öncelik',
+                      medium: '🔵 Dengeli',
+                      high: '🟣 Tavizsiz Güvence'
+                    }}
+                  />
+                </div>
+
+                <div className="text-xs pt-1">
+                  {getHourlyReserveLevel() === 'off' ? (
+                    <div className="p-3 bg-gray-50 rounded-xl text-gray-600 font-medium">
+                      ✓ Kapalı: Ara saatlerde (2. – {Math.max(2, numPeriods - 1)}. saatler) zorunlu yedek/boş öğretmen şartı aranmaz.
+                    </div>
+                  ) : getHourlyReserveLevel() === 'high' ? (
+                    <div className="p-3 bg-purple-50 rounded-xl text-purple-950 font-bold border border-purple-200 flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-purple-600 shrink-0" />
+                      <span>
+                        Tavizsiz Güvence: Her gün 2. saatten {Math.max(2, numPeriods - 1)}. saate kadar tüm ara derslerde (idareciler ve istisnalar hariç) en az {hard.minHourlyReserveTeachers || 1} tam zamanlı öğretmenin okulda boş dersinin (penceresinin) olması garanti edilir.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-gray-500">
+                      💡 Dengeli modda motor, her gün 2. – {Math.max(2, numPeriods - 1)}. saatlerde en az {hard.minHourlyReserveTeachers || 1} öğretmeni öğretmenler odasında boşta (pencerede) tutmayı hedefler; kapalı saat darboğazlarında esnemeye izin verir.
+                    </div>
+                  )}
+                </div>
+
+                {/* ⚖️ OTOMATİK KATEGORİK ADALET MATRİSİ (DERS YÜKÜ × BOŞ SLOT) */}
+                <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-black text-gray-900 flex items-center gap-1.5 uppercase tracking-wider">
+                        <Scale size={14} className="text-blue-600" />
+                        Otomatik Kategorik Adalet Matrisi (Ders Yükü × Boş Slot)
+                      </span>
+                      <p className="text-[11px] text-gray-500">
+                        Boşta öğretmen olma yükünün hep aynı öğretmenlere binmesini önler; saatlerini kapatmayan öğretmenleri korur.
+                      </p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-bold text-gray-800 bg-blue-50/70 border border-blue-200 px-3 py-1.5 rounded-xl">
+                      <input
+                        type="checkbox"
+                        checked={hard.enforceCategoricalFairness !== false}
+                        onChange={(e) => setHard(prev => ({ ...prev, enforceCategoricalFairness: e.target.checked }))}
+                        className="rounded border-blue-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>Kategorik Adil Dağılım Aktif</span>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                    {/* Kategori 1 */}
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                      <div className="flex items-center justify-between font-bold text-slate-900">
+                        <span>1. Dar Marj (≤2 Boş)</span>
+                        <span className="px-1.5 py-0.5 bg-slate-200 text-slate-800 rounded text-[11px] font-black">0–1 Saat</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600">
+                        Boş slotu 0–2 olanlar ({categoricalAnalysis.cat1.length} kişi). Kapasite korumalı.
+                      </p>
+                      {categoricalAnalysis.cat1.length > 0 && (
+                        <div className="text-[10px] text-slate-700 font-medium truncate" title={categoricalAnalysis.cat1.map(t => `${t.name} (${t.load}s / ${t.freeSlots} boş)`).join(', ')}>
+                          Örn: {categoricalAnalysis.cat1.slice(0, 2).map(t => `${t.name.split(' ')[0]} (${t.load}s/${t.freeSlots}b)`).join(', ')}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Kategori 2 */}
+                    <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-xl space-y-1.5">
+                      <div className="flex items-center justify-between font-bold text-amber-950">
+                        <span>2. Sınırlı Marj (3–5 Boş)</span>
+                        <span className="px-1.5 py-0.5 bg-amber-200 text-amber-900 rounded text-[11px] font-black">1–2 Saat</span>
+                      </div>
+                      <p className="text-[10px] text-amber-800">
+                        Yükü &lt;25s, boş slotu 3–5 olanlar ({categoricalAnalysis.cat2.length} kişi). 0 pencereyle kaçamaz.
+                      </p>
+                      {categoricalAnalysis.cat2.length > 0 && (
+                        <div className="text-[10px] text-amber-900 font-medium truncate" title={categoricalAnalysis.cat2.map(t => `${t.name} (${t.load}s / ${t.freeSlots} boş)`).join(', ')}>
+                          Örn: {categoricalAnalysis.cat2.slice(0, 2).map(t => `${t.name.split(' ')[0]} (${t.load}s/${t.freeSlots}b)`).join(', ')}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Kategori 3 */}
+                    <div className="p-3 bg-purple-50/60 border border-purple-200 rounded-xl space-y-1.5">
+                      <div className="flex items-center justify-between font-bold text-purple-950">
+                        <span>3. Ağır Yük (25+ Saat)</span>
+                        <span className="px-1.5 py-0.5 bg-purple-200 text-purple-900 rounded text-[11px] font-black">1–2 / 1–3s</span>
+                      </div>
+                      <p className="text-[10px] text-purple-800">
+                        25+ saat dersi olanlar ({categoricalAnalysis.cat3.length} kişi). 3–5 boş: 1–2s, 6+ boş: 1–3s.
+                      </p>
+                      {categoricalAnalysis.cat3.length > 0 && (
+                        <div className="text-[10px] text-purple-900 font-medium truncate" title={categoricalAnalysis.cat3.map(t => `${t.name} (${t.load}s / ${t.freeSlots} boş)`).join(', ')}>
+                          Örn: {categoricalAnalysis.cat3.slice(0, 2).map(t => `${t.name.split(' ')[0]} (${t.load}s/${t.freeSlots}b)`).join(', ')}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Kategori 4 */}
+                    <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl space-y-1.5">
+                      <div className="flex items-center justify-between font-bold text-emerald-950">
+                        <span>4. Geniş Marj (6+ Boş)</span>
+                        <span className="px-1.5 py-0.5 bg-emerald-200 text-emerald-900 rounded text-[11px] font-black">1–3 Saat</span>
+                      </div>
+                      <p className="text-[10px] text-emerald-800">
+                        Yükü &lt;25s, boş slotu 6+ olanlar ({categoricalAnalysis.cat4.length} kişi). İyi niyet korumalı (≤3s).
+                      </p>
+                      {categoricalAnalysis.cat4.length > 0 && (
+                        <div className="text-[10px] text-emerald-900 font-medium truncate" title={categoricalAnalysis.cat4.map(t => `${t.name} (${t.load}s / ${t.freeSlots} boş)`).join(', ')}>
+                          Örn: {categoricalAnalysis.cat4.slice(0, 2).map(t => `${t.name.split(' ')[0]} (${t.load}s/${t.freeSlots}b)`).join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* KURAL 1.4: GÜNLÜK DERS DAĞILIM DENGESİ & HAFTALIK ASGARİ DERS GÜNÜ GÜVENCESİ */}
             <div className="bg-white border border-gray-200 rounded-2xl shadow-xs overflow-hidden">
               <div className="p-4 sm:p-5 border-b border-gray-100 bg-gray-50/60 flex justify-between items-start gap-4">
                 <div className="space-y-1">
                   <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
                     <Scale size={16} className="text-blue-600 shrink-0" />
-                    Günlük Ders Dağılım Dengesi & Boş Gün Güvencesi
+                    Günlük Ders Dağılım Dengesi & Haftalık Asgari Ders Günü Güvencesi
                   </h3>
                   <p className="text-xs text-gray-500">
-                    Öğretmenin ders yükünü aktif günlere adil dağıtır; dersi az olan öğretmenlerin derslerini sıkılaştırarak tam boş gün kazanmalarını sağlar.
+                    Öğretmenlerin ders yükünü aktif günlere adil dağıtır; istisnalar dışında hiçbir öğretmene haftada 3 gün ve altında ders verilmemesini (en az 4 gün aktif ders) garanti eder.
                   </p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer shrink-0">
@@ -341,19 +1102,199 @@ export default function Constraints() {
                 </label>
               </div>
 
-              {hard.enforceDailyBalance ? (
-                <div className="p-4 sm:p-5 bg-white space-y-4">
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900 flex items-start gap-2.5">
-                    <Info size={16} className="text-emerald-600 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="block text-emerald-950 font-bold">🌟 Tam Boş Gün Koruma Mekanizması Açık</strong>
-                      <span className="text-[11px] text-emerald-800 leading-relaxed block mt-0.5">
-                        Haftalık 10-18 saat dersi olan öğretmenlere haftada en az 1 veya 2 tam boş gün ayrılır. 0 saat olan boş günler denge kısıtını bozmaz.
-                      </span>
-                    </div>
+              <div className="p-4 sm:p-5 bg-white space-y-5">
+                {/* BÖLÜM A: HAFTALIK ASGARİ AKTİF DERS GÜNÜ (3 GÜN VE ALTINDA DERS VERMEME) */}
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-extrabold text-gray-900 flex items-center gap-1.5">
+                      <ShieldCheck size={15} className="text-blue-600 shrink-0" />
+                      Haftalık Asgari Aktif Ders Günü Sınırı (İstisna Dışında 3 Gün ve Altı Yasak):
+                    </span>
                   </div>
 
-                  <div className="pt-2 max-w-sm">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      { val: 0, label: 'Kapalı (Serbest)' },
+                      { val: 3, label: 'En Az 3 Gün (En Fazla 2 Boş Gün)' },
+                      { val: 4, label: 'En Az 4 Gün (3 Gün ve Altı Yasak - Önerilen)' },
+                      { val: 5, label: '5 Gün (Boş Günsüz)' }
+                    ].map(opt => {
+                      const activeVal = getMinActiveDaysLevel() === 'off' ? 0 : (hard.minActiveDays ?? 4);
+                      const isSelected = activeVal === opt.val;
+                      return (
+                        <button
+                          key={opt.val}
+                          type="button"
+                          onClick={() => {
+                            if (opt.val === 0) {
+                              setMinActiveDaysLevel('off');
+                              setHard(prev => ({ ...prev, enforceMinActiveDays: false, minActiveDays: 0, minActiveDaysLevel: 'off', minActiveDaysPenalty: 0 }));
+                            } else {
+                              const currLvl = getMinActiveDaysLevel();
+                              const nextLvl = currLvl === 'off' ? 'high' : currLvl;
+                              const nextPen = nextLvl === 'high' ? 1000 : nextLvl === 'medium' ? 80 : 30;
+                              setHard(prev => ({
+                                ...prev,
+                                enforceMinActiveDays: true,
+                                minActiveDays: opt.val,
+                                minActiveDaysLevel: nextLvl,
+                                minActiveDaysPenalty: nextPen
+                              }));
+                              setSoft(prev => ({
+                                ...prev,
+                                minActiveDaysLevel: nextLvl,
+                                minActiveDaysPenalty: nextPen
+                              }));
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-all ${
+                            isSelected
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                              : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="space-y-1.5 pt-1">
+                    <label className="text-xs font-bold text-gray-700 block">Asgari Ders Günü Kural Önceliği:</label>
+                    <PriorityBadges
+                      currentLevel={getMinActiveDaysLevel()}
+                      onChange={setMinActiveDaysLevel}
+                      labels={{
+                        off: '⚪ Kapalı',
+                        low: '🟡 Düşük Öncelik',
+                        medium: '🔵 Dengeli',
+                        high: '🟣 Tavizsiz (3 Gün ve Altı Yasak)'
+                      }}
+                    />
+                  </div>
+
+                  {/* 3 Kademeli Asgari Gün Muafiyet & Güvence Özeti */}
+                  {getMinActiveDaysLevel() !== 'off' && (
+                    <div className="space-y-2.5 pt-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                        <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl">
+                          <div className="flex items-center justify-between font-bold text-emerald-950">
+                            <span>En Az {hard.minActiveDays || 4} Gün Güvencesi</span>
+                            <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded font-black">
+                              {minActiveDaysAnalysis.guaranteed.length} Öğretmen
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-emerald-800 mt-1">
+                            Açık günü ≥{hard.minActiveDays || 4} olan standart öğretmenler; 3 gün ve altına sıkıştırılmaz.
+                          </p>
+                        </div>
+
+                        <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-xl">
+                          <div className="flex items-center justify-between font-bold text-amber-950">
+                            <span>Kapasite Muafiyeti (≤3 Açık Gün)</span>
+                            <span className="px-1.5 py-0.5 bg-amber-100 text-amber-900 rounded font-black">
+                              {minActiveDaysAnalysis.capacityExempt.length} Öğretmen
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-amber-800 mt-1">
+                            Takviminde ≤3 açık günü olanlar ({minActiveDaysAnalysis.capacityExempt.map(t => `${t.name} (${t.openDays}g)`).join(', ') || 'Yok'}) otomatik korunur.
+                          </p>
+                        </div>
+
+                        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                          <div className="flex items-center justify-between font-bold text-slate-800">
+                            <span>İstisna / İdareci / Özel Muaf</span>
+                            <span className="px-1.5 py-0.5 bg-slate-200 text-slate-800 rounded font-black">
+                              {minActiveDaysAnalysis.statusExempt.length} Öğretmen
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-600 mt-1">
+                            İdareci, istisna (&lt;17s / ≤8s), 2 gün kayan boş gün veya özel muaf seçilenler.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <span className="text-[11px] text-gray-500">
+                          💡 Özel izinle 3 gün (veya daha az) derse gelmesine izin verilen öğretmenleri istisna listesine ekleyebilirsiniz.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowMinDaysExemptModal(!showMinDaysExemptModal)}
+                          className="px-2.5 py-1 text-xs font-bold bg-indigo-50 text-indigo-800 hover:bg-indigo-100 border border-indigo-200 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <span>3 Gün Ders İstisnası Tanımla ({(hard.minDaysExemptTeacherIds || []).length} Özel Seçili)</span>
+                          {showMinDaysExemptModal ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                        </button>
+                      </div>
+
+                      {showMinDaysExemptModal && (
+                        <div className="p-3 bg-indigo-50/40 border border-indigo-200 rounded-xl space-y-2.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-[11px] font-bold text-indigo-950">
+                              3 Gün veya Altında Ders Verilmesine İzin Verilen (Muaf) Öğretmenleri Seçin:
+                            </span>
+                            <div className="relative w-44">
+                              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                              <input
+                                type="text"
+                                value={minDaysExemptSearch}
+                                onChange={(e) => setMinDaysExemptSearch(e.target.value)}
+                                placeholder="Öğretmen ara..."
+                                className="w-full pl-7 pr-2 py-1 text-xs border border-indigo-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="max-h-44 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                            {(teachers || [])
+                              .filter(t => !minDaysExemptSearch || t.name.toLowerCase().includes(minDaysExemptSearch.toLowerCase()) || t.branch?.toLowerCase().includes(minDaysExemptSearch.toLowerCase()))
+                              .map(t => {
+                                const isSelected = (hard.minDaysExemptTeacherIds || []).includes(t.id);
+                                const load = teacherLoads[t.id] || 0;
+                                const openDays = days.filter(d => (t.unavailable?.[d] || []).length < numPeriods).length;
+                                return (
+                                  <div
+                                    key={t.id}
+                                    onClick={() => toggleTeacherMinDaysExemption(t.id)}
+                                    className={`px-2.5 py-1.5 rounded-lg border text-xs flex items-center justify-between cursor-pointer transition-all ${
+                                      isSelected
+                                        ? 'bg-indigo-100/80 border-indigo-300 font-bold text-indigo-950'
+                                        : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => {}}
+                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                      />
+                                      <span className="truncate">{t.name}</span>
+                                      <span className="text-[10px] text-gray-400">({t.branch || 'Genel'})</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-[10px] text-gray-500 shrink-0">
+                                      <span>Yük: {load}s</span>
+                                      <span>Açık Gün: {openDays}g</span>
+                                      {isSelected && (
+                                        <span className="px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-900 font-bold text-[9px]">
+                                          3 Gün Muaf
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* BÖLÜM B: AKTİF GÜNDE MİNİMUM DERS SAATİ */}
+                {hard.enforceDailyBalance ? (
+                  <div className="pt-3 border-t border-gray-100 max-w-sm">
                     <div className="space-y-1.5">
                       <label className="text-xs font-bold text-gray-700 block">Dersli Günde Minimum Ders Saati:</label>
                       <select 
@@ -370,15 +1311,15 @@ export default function Constraints() {
                       </span>
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="p-4 bg-amber-50/60 text-amber-900 text-xs font-medium">
-                  ⚠️ Bu kural devre dışı. Motor günleri dengelemeye çalışmaz.
-                </div>
-              )}
+                ) : (
+                  <div className="p-3 bg-amber-50/60 text-amber-900 text-xs font-medium rounded-xl">
+                    ⚠️ Günlük asgari ders saati dengesi devre dışı.
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* KURAL 1.3: GÜNE ERKEN BAŞLAMA EĞİLİMİ (SEZGİSEL 4 KADEME) */}
+            {/* KURAL 1.4: GÜNE ERKEN BAŞLAMA EĞİLİMİ (SEZGİSEL 4 KADEME) */}
             <div className="bg-white border border-gray-200 rounded-2xl shadow-xs p-4 sm:p-5 space-y-3">
               <div className="space-y-1">
                 <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
@@ -487,7 +1428,7 @@ export default function Constraints() {
                     Yoğun / Ağır Ders Günlük Tavan Sınırı
                   </h3>
                   <p className="text-xs text-gray-500">
-                    Bir sınıfa aynı dersten tek bir günde aşırı yükleme yapılmasını engeller.
+                    Haftalık 6 saatten fazla olan dersleri (veya meslek/atölye derslerini) bir günde en fazla 3-4 saat olacak şekilde sınıflara dengeli paylaştırır.
                   </p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer shrink-0">

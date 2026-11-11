@@ -122,7 +122,13 @@ export default function AvailabilityGrid({ settings, teacher, onChange, totalAss
   const isCapacityExceeded = openSlotsCount < totalAssignedHours;
   const marginHours = openSlotsCount - totalAssignedHours;
 
-  const priorityDay = teacher.priorityFullDay || '';
+  const priorityDays: string[] = Array.isArray(teacher.priorityFullDays)
+    ? teacher.priorityFullDays
+    : Array.isArray(teacher.priorityFullDay)
+      ? teacher.priorityFullDay
+      : teacher.priorityFullDay
+        ? [teacher.priorityFullDay]
+        : [];
   const fillLate = Boolean(teacher.fillLateHours);
 
   return (
@@ -225,7 +231,7 @@ export default function AvailabilityGrid({ settings, teacher, onChange, totalAss
               {days.map(day => {
                 const dayClosedCount = (localUnavailable[day] || []).length;
                 const isFullDayClosed = dayClosedCount === periodsPerDay;
-                const isPriorityDay = priorityDay === day;
+                const isPriorityDay = priorityDays.includes(day);
 
                 return (
                   <th
@@ -284,7 +290,7 @@ export default function AvailabilityGrid({ settings, teacher, onChange, totalAss
                   </td>
                   {days.map(day => {
                     const closed = (localUnavailable[day] || []).includes(period);
-                    const isPriorityDay = priorityDay === day;
+                    const isPriorityDay = priorityDays.includes(day);
                     const isPriorityLateHighlight = isPriorityDay && fillLate && isLatePeriod && !closed;
 
                     return (

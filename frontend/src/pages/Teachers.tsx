@@ -110,6 +110,25 @@ export default function Teachers() {
     return classrooms.reduce((sum, c) => sum + (c.courses?.filter(co => co.teacherId === tId).reduce((s, co) => s + (Number(co.hoursPerWeek)||0), 0) || 0), 0);
   };
 
+  // Öncelikli tam doldurulacak günleri dizi olarak normalize et (Çoklu seçim + geriye dönük uyumlu)
+  const getPriorityDays = (t: any): string[] => {
+    if (!t) return [];
+    const list: string[] = [];
+    if (Array.isArray(t.priorityFullDays)) {
+      t.priorityFullDays.forEach((d: string) => {
+        if (d && daysArray.includes(d) && !list.includes(d)) list.push(d);
+      });
+    }
+    if (Array.isArray(t.priorityFullDay)) {
+      t.priorityFullDay.forEach((d: string) => {
+        if (d && daysArray.includes(d) && !list.includes(d)) list.push(d);
+      });
+    } else if (typeof t.priorityFullDay === 'string' && t.priorityFullDay && daysArray.includes(t.priorityFullDay)) {
+      if (!list.includes(t.priorityFullDay)) list.push(t.priorityFullDay);
+    }
+    return list;
+  };
+
   // KPI ve İstatistik Metrikleri
   const stats = useMemo(() => {
     let totalAssignedHours = 0;
@@ -223,6 +242,7 @@ export default function Teachers() {
         isExempt: false,
         isAdministrator: false,
         priorityFullDay: null,
+        priorityFullDays: [],
         fillLateHours: false,
         floatingConstraints: {
           freeDayPreference: 'none',
@@ -654,7 +674,7 @@ export default function Teachers() {
                 className={`bg-white border rounded-2xl p-4 shadow-2xs hover:shadow-xs transition-all flex flex-col justify-between gap-3.5 ${
                   isOverloaded 
                     ? 'border-amber-300 bg-amber-50/20' 
-                    : t.priorityFullDay
+                    : getPriorityDays(t).length > 0
                       ? 'border-indigo-200'
                       : t.isExempt
                         ? 'border-amber-200'
@@ -691,14 +711,14 @@ export default function Teachers() {
                             <ShieldAlert size={10} className="text-amber-700" /> İstisna
                           </button>
                         )}
-                        {t.priorityFullDay && (
+                        {getPriorityDays(t).length > 0 && (
                           <button
                             type="button"
                             onClick={() => openScheduleModal(t)}
                             className="bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-[9px] font-black px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors"
-                            title={`${t.priorityFullDay} günü tam doldurulacak${t.fillLateHours ? ', son saatler kesin dolu olsun' : ''} (Düzenlemek için tıklayın)`}
+                            title={`${getPriorityDays(t).join(', ')} günleri tam doldurulacak${t.fillLateHours ? ', son saatler kesin dolu olsun' : ''} (Düzenlemek için tıklayın)`}
                           >
-                            <CalendarDays size={10} className="text-indigo-700" /> 📌 {t.priorityFullDay.slice(0, 3)} {t.fillLateHours ? 'Tam + Son Sa.' : 'Tam Dolu'}
+                            <CalendarDays size={10} className="text-indigo-700" /> 📌 {getPriorityDays(t).map(d => d.slice(0, 3)).join(', ')} {t.fillLateHours ? 'Tam + Son Sa.' : 'Tam Dolu'}
                           </button>
                         )}
                         {t.floatingConstraints?.freeDayPreference === 'floating_1_day' && (
@@ -819,7 +839,7 @@ export default function Teachers() {
                       {daysArray.map(day => {
                         const isDayOff = (t.unavailable?.[day] || []).length === numPeriods;
                         const isPartiallyClosed = (t.unavailable?.[day] || []).length > 0 && !isDayOff;
-                        const isPriorityDay = t.priorityFullDay === day;
+                        const isPriorityDay = getPriorityDays(t).includes(day);
                         const shortDay = day.slice(0, 3);
 
                         return (
@@ -856,7 +876,7 @@ export default function Teachers() {
                       const hasSpecialPref = Boolean(
                         t.isAdministrator ||
                         t.isExempt ||
-                        t.priorityFullDay ||
+                        getPriorityDays(t).length > 0 ||
                         (t.floatingConstraints?.freeDayPreference && t.floatingConstraints.freeDayPreference !== 'none') ||
                         (t.floatingConstraints?.freeHalfDayPreference && t.floatingConstraints.freeHalfDayPreference !== 'none')
                       );
@@ -1271,24 +1291,31 @@ export default function Teachers() {
                     </div>
                   </div>
 
-                  {/* 3. SEÇİLEN BİR GÜNÜN TAM DOLMASI & SON SAATLER */}
+                  {/* 3. SEÇİLEN GÜNLERİN TAM DOLMASI & SON SAATLER (ÇOKLU GÜN SEÇİMİ) */}
                   <div className="bg-indigo-50/50 border border-indigo-200 rounded-2xl p-3 shadow-2xs space-y-2.5">
                     <div>
-                      <span className="text-[11px] font-black text-indigo-950 flex items-center gap-1.5">
-                        <CalendarDays size={13} className="text-indigo-600 shrink-0" />
-                        <span>3. Seçilen Bir Günün Tam Dolması (Öncelikli Gün)</span>
-                      </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-black text-indigo-950 flex items-center gap-1.5">
+                          <CalendarDays size={13} className="text-indigo-600 shrink-0" />
+                          <span>3. Seçilen Günlerin Tam Dolması (Öncelikli Günler)</span>
+                        </span>
+                        <span className="text-[9.5px] font-bold text-indigo-700 bg-indigo-100/80 px-1.5 py-0.5 rounded">
+                          {getPriorityDays(activeScheduleTeacher).length > 0
+                            ? `${getPriorityDays(activeScheduleTeacher).length} Gün Seçili`
+                            : 'Çoklu Seçilebilir'}
+                        </span>
+                      </div>
                       <p className="text-[10px] text-indigo-800 leading-snug mt-0.5">
-                        Seçilen güne olabildiğince çok ders toplanır; öğretmenin o günü tam dolu geçirmesi sağlanır.
+                        1, 2 veya daha fazla gün seçebilirsiniz. Seçilen günlere olabildiğince çok ders toplanarak öğretmenin o günleri tam dolu geçirmesi sağlanır.
                       </p>
                     </div>
 
                     <div className="grid grid-cols-6 gap-1">
                       <button
                         type="button"
-                        onClick={() => updateTeacher(activeScheduleTeacher.id, { priorityFullDay: null, fillLateHours: false })}
+                        onClick={() => updateTeacher(activeScheduleTeacher.id, { priorityFullDays: [], priorityFullDay: null, fillLateHours: false })}
                         className={`py-1.5 px-1 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
-                          !activeScheduleTeacher.priorityFullDay
+                          getPriorityDays(activeScheduleTeacher).length === 0
                             ? 'bg-slate-800 text-white border-slate-900 shadow-xs'
                             : 'bg-white text-slate-600 border-indigo-200 hover:bg-indigo-100/50'
                         }`}
@@ -1296,21 +1323,25 @@ export default function Teachers() {
                         Yok
                       </button>
                       {daysArray.map(d => {
-                        const isSelected = activeScheduleTeacher.priorityFullDay === d;
+                        const currentDays = getPriorityDays(activeScheduleTeacher);
+                        const isSelected = currentDays.includes(d);
                         return (
                           <button
                             key={d}
                             type="button"
                             onClick={() => {
-                              const nextDay = isSelected ? null : d;
+                              const nextDays = isSelected
+                                ? currentDays.filter(item => item !== d)
+                                : daysArray.filter(dayName => currentDays.includes(dayName) || dayName === d);
                               const updates: Record<string, any> = {
-                                priorityFullDay: nextDay,
-                                fillLateHours: nextDay ? Boolean(activeScheduleTeacher.fillLateHours) : false
+                                priorityFullDays: nextDays,
+                                priorityFullDay: nextDays[0] || null,
+                                fillLateHours: nextDays.length > 0 ? Boolean(activeScheduleTeacher.fillLateHours) : false
                               };
                               // Eğer tam doldurulacak gün tamamen kapalıysa otomatik açalım ki çelişmesin
-                              if (nextDay && (activeScheduleTeacher.unavailable?.[nextDay] || []).length === numPeriods) {
+                              if (!isSelected && (activeScheduleTeacher.unavailable?.[d] || []).length === numPeriods) {
                                 const nextUnavailable = { ...(activeScheduleTeacher.unavailable || {}) };
-                                delete nextUnavailable[nextDay];
+                                delete nextUnavailable[d];
                                 updates.unavailable = nextUnavailable;
                               }
                               updateTeacher(activeScheduleTeacher.id, updates);
@@ -1320,7 +1351,7 @@ export default function Teachers() {
                                 ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs ring-1 ring-indigo-400'
                                 : 'bg-white text-indigo-900 border-indigo-200 hover:bg-indigo-100/60'
                             }`}
-                            title={`${d} gününü öncelikli tam dolu gün yap`}
+                            title={`${d} gününü öncelikli tam dolu günlere ekle / çıkar`}
                           >
                             {d.slice(0, 3)}
                           </button>
@@ -1331,13 +1362,13 @@ export default function Teachers() {
                     {/* Son Saatler Kesin Dolu Olsun (7. ve 8. Saatler) */}
                     <button
                       type="button"
-                      disabled={!activeScheduleTeacher.priorityFullDay}
+                      disabled={getPriorityDays(activeScheduleTeacher).length === 0}
                       onClick={() => {
-                        if (!activeScheduleTeacher.priorityFullDay) return;
+                        if (getPriorityDays(activeScheduleTeacher).length === 0) return;
                         updateTeacher(activeScheduleTeacher.id, { fillLateHours: !activeScheduleTeacher.fillLateHours });
                       }}
                       className={`w-full p-2 rounded-xl border text-left transition-all flex items-center gap-2.5 ${
-                        !activeScheduleTeacher.priorityFullDay
+                        getPriorityDays(activeScheduleTeacher).length === 0
                           ? 'bg-slate-100/70 border-slate-200 opacity-60 cursor-not-allowed'
                           : activeScheduleTeacher.fillLateHours
                             ? 'bg-indigo-100/90 border-indigo-400 cursor-pointer shadow-2xs'
@@ -1345,20 +1376,20 @@ export default function Teachers() {
                       }`}
                     >
                       <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
-                        activeScheduleTeacher.fillLateHours && activeScheduleTeacher.priorityFullDay
+                        activeScheduleTeacher.fillLateHours && getPriorityDays(activeScheduleTeacher).length > 0
                           ? 'bg-indigo-600 border-indigo-600 text-white'
                           : 'bg-white border-slate-300'
                       }`}>
-                        {activeScheduleTeacher.fillLateHours && activeScheduleTeacher.priorityFullDay && <Check size={11} />}
+                        {activeScheduleTeacher.fillLateHours && getPriorityDays(activeScheduleTeacher).length > 0 && <Check size={11} />}
                       </div>
                       <div className="min-w-0">
                         <div className="font-bold text-[10.5px] text-indigo-950">
                           Son Saatleri Kesin Dolu Olsun ({numPeriods - 1}. ve {numPeriods}. Saatler)
                         </div>
                         <div className="text-[9.5px] text-indigo-700 leading-tight">
-                          {activeScheduleTeacher.priorityFullDay
-                            ? `${activeScheduleTeacher.priorityFullDay} günündeki dersler özellikle son saatlere de yerleştirilir.`
-                            : 'Aktifleştirmek için yukarıdan tam doldurulacak bir gün seçin.'}
+                          {getPriorityDays(activeScheduleTeacher).length > 0
+                            ? `${getPriorityDays(activeScheduleTeacher).join(', ')} günlerindeki dersler özellikle son saatlere de yerleştirilir.`
+                            : 'Aktifleştirmek için yukarıdan tam doldurulacak en az bir gün seçin.'}
                         </div>
                       </div>
                     </button>
@@ -1437,6 +1468,7 @@ export default function Teachers() {
                       isExempt: false,
                       isAdministrator: false,
                       priorityFullDay: null,
+                      priorityFullDays: [],
                       fillLateHours: false,
                       floatingConstraints: {
                         freeDayPreference: 'none',

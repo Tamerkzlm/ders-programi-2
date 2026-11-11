@@ -296,39 +296,67 @@ export const evaluateSwapOrMove = ({
   const tgtSlot = (timetable[tgtClassId]?.[tgtDay] || []).find(s => Number(s.period) === tgtPeriod);
   const tgtTeacher = tgtSlot ? teachers.find(t => t.id === tgtSlot.teacherId) : null;
 
-  // Yardımcı: meşguliyet kontrolü
-  const isAvailable = (teacherId, day, period, ignoreCId, ignoreD, ignoreP) => {
-    const tObj = teachers.find(t => t.id === teacherId);
-    if (!tObj) return false;
-    if ((tObj.unavailable?.[day] || []).some(p => Number(p) === Number(period))) {
-      return false;
-    }
+  // Yardımcı: Başka bir sınıfta ders çakışması kontrolü
+  const getTeachingConflict = (teacherId: string, day: string, period: number, ignoreCId: string, ignoreD: string, ignoreP: number) => {
     for (const cId of Object.keys(timetable)) {
       const slots = timetable[cId]?.[day] || [];
-      const conflict = slots.find(s => {
+      const conflict = slots.find((s: any) => {
         if (Number(s.period) !== Number(period) || s.teacherId !== teacherId) return false;
         if (cId === ignoreCId && day === ignoreD && Number(s.period) === Number(ignoreP)) return false;
         return true;
       });
-      if (conflict) return false;
+      if (conflict) {
+        return cId;
+      }
     }
-    return true;
+    return null;
   };
 
-  // 1. Kaynak öğretmen hedef saatte müsait mi?
-  const srcCanGo = isAvailable(srcTeacherId, tgtDay, tgtPeriod, srcClassId, srcDay, srcPeriod);
-  if (!srcCanGo) {
+  // Yardımcı: Kısıtlı / kapalı saat kontrolü
+  const isSlotClosed = (teacherId: string, day: string, period: number) => {
+    const tObj = teachers.find(t => t.id === teacherId);
+    if (!tObj) return false;
+    return (tObj.unavailable?.[day] || []).some((p: any) => Number(p) === Number(period));
+  };
+
+  // Öğretmenin gün bazında mevcut ders sayısını hesapla
+  const getTeacherDayLessonCount = (teacherId: string, day: string) => {
+    let count = 0;
+    Object.keys(timetable).forEach(cId => {
+      (timetable[cId]?.[day] || []).forEach((s: any) => {
+        if (s.teacherId === teacherId) count++;
+      });
+    });
+    return count;
+  };
+
+  // Kaynak öğretmenin ders yükü değişimleri
+  const tgtDayHoursBefore = getTeacherDayLessonCount(srcTeacherId, tgtDay);
+  const tgtDayHoursAfter = tgtDayHoursBefore + (srcDay === tgtDay ? 0 : 1);
+  const srcDayHoursBefore = source.fromPool ? 0 : getTeacherDayLessonCount(srcTeacherId, srcDay);
+  const srcDayHoursAfter = source.fromPool ? 0 : Math.max(0, srcDayHoursBefore - (srcDay === tgtDay ? 0 : 1));
+
+  const maxDaily = srcTeacher.hasCustomConstraints && srcTeacher.customMaxHours
+    ? Number(srcTeacher.customMaxHours)
+    : Number(srcTeacher.maxPerDay || (settings?.periodsPerDay || 8));
+  const exceedsDailyCap = tgtDayHoursAfter > maxDaily;
+
+  // 1. Kaynak öğretmen için hedef hücrede ders çakışması var mı?
+  const srcConflictClassId = getTeachingConflict(srcTeacherId, tgtDay, tgtPeriod, srcClassId, srcDay, srcPeriod);
+  if (srcConflictClassId) {
     return {
       isValid: false,
-      reason: `${srcTeacher.name} öğretmeni ${tgtDay} ${tgtPeriod}. saatte kapalı veya başka sınıfta derste!`
+      reason: `${srcTeacher.name} öğretmeni ${tgtDay} ${tgtPeriod}. saatte başka bir sınıfta derste!`
     };
   }
 
+  const srcIsClosed = isSlotClosed(srcTeacherId, tgtDay, tgtPeriod);
+
   // Yardımcı: boşluk hesaplama
-  const getTeacherGaps = (teacherId, day, customTimetable) => {
-    const busy = [];
+  const getTeacherGaps = (teacherId: string, day: string, customTimetable: any) => {
+    const busy: number[] = [];
     Object.keys(customTimetable).forEach(cId => {
-      (customTimetable[cId]?.[day] || []).forEach(s => {
+      (customTimetable[cId]?.[day] || []).forEach((s: any) => {
         if (s.teacherId === teacherId) {
           const p = Number(s.period);
           if (!busy.includes(p)) busy.push(p);
@@ -353,15 +381,19 @@ export const evaluateSwapOrMove = ({
       return { isValid: false, reason: 'Aynı öğretmenin iki dersi takas edilemez' };
     }
 
+    let tgtConflictClassId = null;
+    let tgtIsClosed = false;
+
     // Hedef öğretmen kaynak saate gidebilir mi?
     if (!source.fromPool) {
-      const tgtCanGo = isAvailable(tgtTeacher.id, srcDay, srcPeriod, tgtClassId, tgtDay, tgtPeriod);
-      if (!tgtCanGo) {
+      tgtConflictClassId = getTeachingConflict(tgtTeacher.id, srcDay, srcPeriod, tgtClassId, tgtDay, tgtPeriod);
+      if (tgtConflictClassId) {
         return {
           isValid: false,
-          reason: `${tgtTeacher.name} öğretmeni ${srcDay} ${srcPeriod}. saatte kapalı veya başka sınıfta derste!`
+          reason: `${tgtTeacher.name} öğretmeni ${srcDay} ${srcPeriod}. saatte başka bir sınıfta derste!`
         };
       }
+      tgtIsClosed = isSlotClosed(tgtTeacher.id, srcDay, srcPeriod);
     }
 
     // Boşluk simülasyonu
@@ -372,10 +404,10 @@ export const evaluateSwapOrMove = ({
 
     const sim = JSON.parse(JSON.stringify(timetable));
     if (!source.fromPool) {
-      sim[srcClassId][srcDay] = (sim[srcClassId][srcDay] || []).filter(s => Number(s.period) !== srcPeriod);
+      sim[srcClassId][srcDay] = (sim[srcClassId][srcDay] || []).filter((s: any) => Number(s.period) !== srcPeriod);
       sim[srcClassId][srcDay].push({ period: srcPeriod, subject: tgtSlot.subject, teacherId: tgtTeacher.id });
     }
-    sim[tgtClassId][tgtDay] = (sim[tgtClassId][tgtDay] || []).filter(s => Number(s.period) !== tgtPeriod);
+    sim[tgtClassId][tgtDay] = (sim[tgtClassId][tgtDay] || []).filter((s: any) => Number(s.period) !== tgtPeriod);
     sim[tgtClassId][tgtDay].push({ period: tgtPeriod, subject: source.subject || 'Ders', teacherId: srcTeacher.id });
 
     const t1After = getTeacherGaps(srcTeacher.id, srcDay, sim) +
@@ -387,6 +419,49 @@ export const evaluateSwapOrMove = ({
     const deltaT2 = t2After - t2Before;
     const netGapChange = deltaT1 + deltaT2;
     const newTotalSchoolGaps = Math.max(0, currentTotalGaps + netGapChange);
+
+    // EĞER EN AZ BİRİ KAPALI İSE (KAPALI SLOT AÇILABİLİR DURUMU)
+    if (srcIsClosed || tgtIsClosed) {
+      return {
+        isValid: false,
+        isClosedSlot: true,
+        canUnlockWithConfirm: true,
+        unlockInfo: {
+          teacherId: srcTeacher.id,
+          teacherName: srcTeacher.name,
+          teacherBranch: srcTeacher.branch || '',
+          targetDay: tgtDay,
+          targetPeriod: tgtPeriod,
+          targetClassId: tgtClassId,
+          sourceDay: source.fromPool ? null : srcDay,
+          sourcePeriod: source.fromPool ? null : srcPeriod,
+          sourceClassId: srcClassId,
+          subject: source.subject || 'Ders',
+          srcDayHoursBefore,
+          srcDayHoursAfter,
+          tgtDayHoursBefore,
+          tgtDayHoursAfter,
+          isSameDay: srcDay === tgtDay,
+          maxDaily,
+          exceedsDailyCap,
+          currentTotalGaps,
+          newTotalGaps: newTotalSchoolGaps,
+          netGapChange,
+          isSwap: true,
+          targetTeacherId: tgtTeacher.id,
+          targetTeacherName: tgtTeacher.name,
+          targetSubject: tgtSlot.subject,
+          srcIsClosed,
+          tgtIsClosed
+        },
+        currentTotalGaps,
+        newTotalGaps: newTotalSchoolGaps,
+        netGapChange,
+        deltaT1,
+        deltaT2,
+        reason: `🔒 Kapalı Slot: ${srcIsClosed ? `${srcTeacher.name} (${tgtDay} ${tgtPeriod}. saat)` : ''}${srcIsClosed && tgtIsClosed ? ' ve ' : ''}${tgtIsClosed ? `${tgtTeacher.name} (${srcDay} ${srcPeriod}. saat)` : ''} kapalıdır. Bırakırsanız onayınızla kısıt kaldırılarak ders yerleştirilecektir.`
+      };
+    }
 
     let gapText = `Toplam Pencere: ${currentTotalGaps} ➔ ${newTotalSchoolGaps} (DEĞİŞMEZ ±0)`;
     let badge = 'neutral';
@@ -422,7 +497,7 @@ export const evaluateSwapOrMove = ({
 
   const sim = JSON.parse(JSON.stringify(timetable));
   if (!source.fromPool) {
-    sim[srcClassId][srcDay] = (sim[srcClassId][srcDay] || []).filter(s => Number(s.period) !== srcPeriod);
+    sim[srcClassId][srcDay] = (sim[srcClassId][srcDay] || []).filter((s: any) => Number(s.period) !== srcPeriod);
   }
   if (!sim[tgtClassId][tgtDay]) sim[tgtClassId][tgtDay] = [];
   sim[tgtClassId][tgtDay].push({ period: tgtPeriod, subject: source.subject || 'Ders', teacherId: srcTeacher.id });
@@ -433,6 +508,44 @@ export const evaluateSwapOrMove = ({
   const deltaT1 = t1After - t1Before;
   const netGapChange = deltaT1;
   const newTotalSchoolGaps = Math.max(0, currentTotalGaps + netGapChange);
+
+  // EĞER KAYNAK ÖĞRETMEN HEDEF SAATTE KAPALI İSE (KAPALI SLOT AÇILABİLİR DURUMU)
+  if (srcIsClosed) {
+    return {
+      isValid: false,
+      isClosedSlot: true,
+      canUnlockWithConfirm: true,
+      unlockInfo: {
+        teacherId: srcTeacher.id,
+        teacherName: srcTeacher.name,
+        teacherBranch: srcTeacher.branch || '',
+        targetDay: tgtDay,
+        targetPeriod: tgtPeriod,
+        targetClassId: tgtClassId,
+        sourceDay: source.fromPool ? null : srcDay,
+        sourcePeriod: source.fromPool ? null : srcPeriod,
+        sourceClassId: srcClassId,
+        subject: source.subject || 'Ders',
+        srcDayHoursBefore,
+        srcDayHoursAfter,
+        tgtDayHoursBefore,
+        tgtDayHoursAfter,
+        isSameDay: srcDay === tgtDay,
+        maxDaily,
+        exceedsDailyCap,
+        currentTotalGaps,
+        newTotalGaps: newTotalSchoolGaps,
+        netGapChange,
+        isSwap: false
+      },
+      currentTotalGaps,
+      newTotalGaps: newTotalSchoolGaps,
+      netGapChange,
+      deltaT1,
+      deltaT2: 0,
+      reason: `🔒 Kapalı Slot (Açılabilir): ${srcTeacher.name} için ${tgtDay} ${tgtPeriod}. saat kapalıdır. Bırakırsanız onayınızla kısıt kaldırılarak ders yerleştirilecektir.`
+    };
+  }
 
   let gapText = `Toplam Pencere: ${currentTotalGaps} ➔ ${newTotalSchoolGaps} (DEĞİŞMEZ ±0)`;
   let badge = 'neutral';

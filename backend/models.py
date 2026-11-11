@@ -49,8 +49,9 @@ class Teacher(BaseModel):
     # 🌟 İSTİSNA ÖĞRETMEN (1-2 gün gelip <17 saat dersi olanlar; sert kısıtlar uygulanmaz)
     isExempt: Optional[bool] = False
 
-    # 📌 ÖNCELİKLİ TAM DOLDURULACAK GÜN & SON SAATLER TERCİHİ (Örn: Tamer'in Pazartesi günü)
-    priorityFullDay: Optional[str] = None
+    # 📌 ÖNCELİKLİ TAM DOLDURULACAK GÜNLER & SON SAATLER TERCİHİ (Örn: Tamer'in Pazartesi ve Salı günleri)
+    priorityFullDay: Optional[Any] = None
+    priorityFullDays: Optional[List[str]] = Field(default_factory=list)
     fillLateHours: Optional[bool] = False
 
     # 🏛️ İDARECİ (OKUL YÖNETİCİSİ) ETİKETİ - Dersleri en son boş kalan yerlere dağıtılır
@@ -75,17 +76,49 @@ class SoftConstraints(BaseModel):
     earlyStartPenalty: int = 20
     avoidStemLate: bool = True
     stemLatePenalty: int = 35
+    maxTotalGapsLevel: Optional[str] = "medium"
+    maxTotalGapsPenalty: Optional[int] = 60
+    minTotalGapsLevel: Optional[str] = "off"
+    minTotalGapsPenalty: Optional[int] = 0
+    gapExemptTeacherIds: Optional[List[str]] = Field(default_factory=list)
+    hourlyReserveLevel: Optional[str] = "off"
+    hourlyReservePenalty: Optional[int] = 0
+    minActiveDaysLevel: Optional[str] = "high"
+    minActiveDaysPenalty: Optional[int] = 100
+    minDaysExemptTeacherIds: Optional[List[str]] = Field(default_factory=list)
 
     class Config:
         extra = "allow"
 
 class HardConstraints(BaseModel):
-    enforceMaxGaps: bool = True
-    maxGapsPerDay: int = 2
+    enforceMaxTotalGaps: Optional[bool] = True
+    maxTotalGaps: Optional[int] = 4
+    maxTotalGapsLevel: Optional[str] = "medium"
+    maxTotalGapsPenalty: Optional[int] = 60
+    enforceMinTotalGaps: Optional[bool] = False
+    minTotalGaps: Optional[int] = 0
+    minTotalGapsLevel: Optional[str] = "off"
+    minTotalGapsPenalty: Optional[int] = 0
+    gapExemptTeacherIds: Optional[List[str]] = Field(default_factory=list)
+
+    # 🛡️ SAATLİK YEDEK / NÖBETÇİ ÖĞRETMEN GÜVENCESİ (İLK VE SON SAAT HARİÇ TÜM ARA SAATLER: 2..P-1)
+    enforceHourlyReserve: Optional[bool] = False
+    minHourlyReserveTeachers: Optional[int] = 1
+    hourlyReserveLevel: Optional[str] = "off"
+    hourlyReservePenalty: Optional[int] = 0
+    enforceCategoricalFairness: Optional[bool] = True
+
+    enforceMaxGaps: Optional[bool] = True
+    maxGapsPerDay: Optional[int] = 2
     
-    # ⚖️ GÜNLÜK DERS DAĞILIM DENGESİ: Sadece aktif gündeki minimum ders saati seçeneği!
+    # ⚖️ GÜNLÜK DERS DAĞILIM DENGESİ & HAFTALIK ASGARİ AKTİF DERS GÜNÜ (3 GÜN VE ALTI DERS VERMEME)
     enforceDailyBalance: bool = True
     minDailyHours: int = 3
+    enforceMinActiveDays: Optional[bool] = True
+    minActiveDays: Optional[int] = 4
+    minActiveDaysLevel: Optional[str] = "high"
+    minActiveDaysPenalty: Optional[int] = 100
+    minDaysExemptTeacherIds: Optional[List[str]] = Field(default_factory=list)
     
     enforceConsecutiveClassRules: bool = True
     enforceIntensiveRules: bool = True

@@ -5,8 +5,11 @@ import {
   Lock, 
   Search, 
   X,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Sparkles
 } from 'lucide-react';
+import { useAppStore } from '../../store/appStore';
+import LocalRepairModal from './LocalRepairModal';
 import { calculateTeacherDutyDay } from '../../utils/dutyDayCalculator';
 import { getCourseColorClass } from '../../utils/courseColors';
 import { evaluateSwapOrMove, findSmartSwapOpportunities } from '../../utils/smartSwapEngine';
@@ -27,6 +30,9 @@ export default function TeacherTimetable({
   const [selectedTeacherId, setSelectedTeacherId] = useState(initialTeacherId || teachers[0]?.id || '');
   const [teacherSearch, setTeacherSearch] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+
+  const startLocalRepair = useAppStore(state => state.startLocalRepair);
+  const isLocalRepairing = useAppStore(state => state.isLocalRepairing);
 
   // Dışarıdan initialTeacherId değişirse senkronize et
   useEffect(() => {
@@ -359,6 +365,18 @@ export default function TeacherTimetable({
             </button>
           )}
 
+          {/* ⚡ LOKAL YENİDEN DAĞITIM (RUIN & RECREATE) BUTONU */}
+          <button
+            type="button"
+            onClick={() => startLocalRepair(selectedTeacher.id)}
+            disabled={isLocalRepairing}
+            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50"
+            title="Seçili öğretmenin programını sıfırlayıp yalnızca girdiği sınıflar içinde yeniden dağıtır (okulun kalanı dondurulur)"
+          >
+            <Sparkles size={13} className="text-emerald-600" />
+            <span>{isLocalRepairing ? 'Dağıtılıyor...' : 'Bu Öğretmeni Yeniden Dağıt'}</span>
+          </button>
+
         </div>
 
       </div>
@@ -415,21 +433,54 @@ export default function TeacherTimetable({
                   const isPinned = item ? isSlotPinned(item.classId, day, period) : false;
                   const colorStyle = item ? getCourseColorClass(item.subject, item.className) : '';
 
-                  if (isClosed) {
-                    return (
-                      <div
-                        key={period}
-                        className="p-2.5 rounded-xl bg-slate-100/60 border border-slate-200/60 flex items-center justify-center text-[10px] font-bold text-slate-400 select-none min-h-[58px]"
-                      >
-                        ⛔ Kapalı Saat
-                      </div>
-                    );
-                  }
-
                   const isHovered = dragHoverEval && dragHoverEval.day === day && dragHoverEval.period === period;
                   const isSelected = selectedSlotForSwap && selectedSlotForSwap.day === day && Number(selectedSlotForSwap.period) === Number(period);
                   const isSwapCandidate = selectedSlotForSwap && swapMap.has(`${day}-${period}`);
                   const candidateOpp = isSwapCandidate ? swapMap.get(`${day}-${period}`) : null;
+
+                  if (isClosed) {
+                    return (
+                      <div
+                        key={period}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          handleCellHover(item?.classId, day, period);
+                        }}
+                        onDragEnter={() => handleCellHover(item?.classId, day, period)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          handleDragEnd();
+                          if (!handleCellMoveOrSwap) return;
+                          try {
+                            const raw = e.dataTransfer.getData("text/plain");
+                            if (!raw) return;
+                            const source = JSON.parse(raw);
+                            handleCellMoveOrSwap(source.classId, source, { day, period });
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className={`p-2 rounded-xl transition-all relative flex flex-col items-center justify-center text-center select-none min-h-[58px] ${
+                          isHovered && dragHoverEval?.isClosedSlot && dragHoverEval?.canUnlockWithConfirm
+                            ? 'bg-amber-100/95 ring-4 ring-amber-500 ring-inset shadow-xl scale-[1.03] z-30 animate-pulse text-amber-950 border border-amber-400'
+                            : 'bg-slate-100/60 border border-slate-200/60 text-slate-400'
+                        }`}
+                      >
+                        {isHovered && dragHoverEval?.isClosedSlot && dragHoverEval?.canUnlockWithConfirm ? (
+                          <div className="space-y-0.5">
+                            <span className="text-[10px] font-black text-amber-900 flex items-center justify-center gap-1">
+                              <Lock size={11} /> Kısıtı Aç & Bırak
+                            </span>
+                            <span className="text-[9px] font-extrabold text-amber-700 block">
+                              +{dragHoverEval.unlockInfo?.tgtDayHoursAfter - dragHoverEval.unlockInfo?.tgtDayHoursBefore} sa ({dragHoverEval.unlockInfo?.tgtDayHoursBefore}➔{dragHoverEval.unlockInfo?.tgtDayHoursAfter})
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] font-bold">⛔ Kapalı Saat</span>
+                        )}
+                      </div>
+                    );
+                  }
 
                   return (
                     <div
@@ -459,13 +510,15 @@ export default function TeacherTimetable({
                       }}
                       className={`min-h-[58px] rounded-xl transition-all relative ${
                         isHovered 
-                          ? dragHoverEval.isValid
-                            ? dragHoverEval.netGapChange < 0
-                              ? 'bg-emerald-100/90 ring-4 ring-emerald-500 ring-inset shadow-xl scale-[1.02] z-30 animate-pulse'
-                              : dragHoverEval.netGapChange > 0
-                                ? 'bg-rose-100/90 ring-4 ring-rose-500 ring-inset shadow-xl scale-[1.02] z-30 animate-pulse'
-                                : 'bg-indigo-100/80 ring-3 ring-indigo-500 ring-inset shadow-md scale-[1.01] z-30'
-                            : 'bg-rose-100/60 ring-2 ring-rose-400 ring-inset'
+                          ? dragHoverEval.isClosedSlot && dragHoverEval.canUnlockWithConfirm
+                            ? 'bg-amber-100/90 ring-4 ring-amber-500 ring-inset shadow-xl scale-[1.02] z-30 animate-pulse'
+                            : dragHoverEval.isValid
+                              ? dragHoverEval.netGapChange < 0
+                                ? 'bg-emerald-100/90 ring-4 ring-emerald-500 ring-inset shadow-xl scale-[1.02] z-30 animate-pulse'
+                                : dragHoverEval.netGapChange > 0
+                                  ? 'bg-rose-100/90 ring-4 ring-rose-500 ring-inset shadow-xl scale-[1.02] z-30 animate-pulse'
+                                  : 'bg-indigo-100/80 ring-3 ring-indigo-500 ring-inset shadow-md scale-[1.01] z-30'
+                              : 'bg-rose-100/60 ring-2 ring-rose-400 ring-inset'
                           : isSwapCandidate
                             ? candidateOpp?.netGapChange < 0
                               ? 'bg-emerald-50/80 ring-2 ring-emerald-500 ring-inset animate-pulse cursor-pointer shadow-xs'
@@ -593,24 +646,32 @@ export default function TeacherTimetable({
       {/* ⚡ CANLI SÜRÜKLE-BIRAK BİLGİ VE BOŞLUK DEĞİŞİM EKRANI (HUD) */}
       {draggedSource && (
         <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 text-white px-5 py-3.5 rounded-2xl shadow-2xl border backdrop-blur-md flex items-center gap-4 text-xs max-w-2xl w-[92%] animate-in fade-in slide-in-from-bottom-3 select-none transition-all ${
-          dragHoverEval && dragHoverEval.isValid
-            ? dragHoverEval.netGapChange < 0
-              ? 'bg-slate-950/95 border-emerald-500 ring-2 ring-emerald-500/40 shadow-emerald-950/60'
-              : dragHoverEval.netGapChange > 0
-                ? 'bg-slate-950/95 border-rose-500 ring-2 ring-rose-500/40 shadow-rose-950/60'
-                : 'bg-slate-950/95 border-slate-700/80'
-            : 'bg-slate-950/95 border-slate-700/80'
+          dragHoverEval?.isClosedSlot && dragHoverEval?.canUnlockWithConfirm
+            ? 'bg-slate-950/95 border-amber-500 ring-2 ring-amber-500/40 shadow-amber-950/60'
+            : dragHoverEval && dragHoverEval.isValid
+              ? dragHoverEval.netGapChange < 0
+                ? 'bg-slate-950/95 border-emerald-500 ring-2 ring-emerald-500/40 shadow-emerald-950/60'
+                : dragHoverEval.netGapChange > 0
+                  ? 'bg-slate-950/95 border-rose-500 ring-2 ring-rose-500/40 shadow-rose-950/60'
+                  : 'bg-slate-950/95 border-slate-700/80'
+              : 'bg-slate-950/95 border-slate-700/80'
         }`}>
           <div className={`p-2 rounded-xl shrink-0 transition-all ${
-            dragHoverEval && dragHoverEval.isValid
-              ? dragHoverEval.netGapChange < 0
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 animate-pulse'
-                : dragHoverEval.netGapChange > 0
-                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'
-                  : 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/30'
-              : 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/30'
+            dragHoverEval?.isClosedSlot && dragHoverEval?.canUnlockWithConfirm
+              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse'
+              : dragHoverEval && dragHoverEval.isValid
+                ? dragHoverEval.netGapChange < 0
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 animate-pulse'
+                  : dragHoverEval.netGapChange > 0
+                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'
+                    : 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/30'
+                : 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/30'
           }`}>
-            <ArrowRightLeft size={18} />
+            {dragHoverEval?.isClosedSlot && dragHoverEval?.canUnlockWithConfirm ? (
+              <Lock size={18} />
+            ) : (
+              <ArrowRightLeft size={18} />
+            )}
           </div>
 
           <div className="flex-1 min-w-0">
@@ -671,6 +732,43 @@ export default function TeacherTimetable({
                     </div>
                   )}
                 </div>
+              ) : dragHoverEval.isClosedSlot && dragHoverEval.canUnlockWithConfirm ? (
+                <div className="text-xs font-bold mt-1 leading-snug">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-amber-300 font-extrabold flex items-center gap-1">
+                      <Lock size={12} className="inline" /> Kapalı Slot (Açılabilir):
+                    </span>
+                    <span>{dragHoverEval.unlockInfo?.teacherName} için {dragHoverEval.day} {dragHoverEval.period}. saat kapalıdır.</span>
+                    <span className="text-amber-200 bg-amber-950/80 border border-amber-500/40 px-2 py-0.5 rounded-md">
+                      {dragHoverEval.day}: {dragHoverEval.unlockInfo?.tgtDayHoursBefore} ➔ {dragHoverEval.unlockInfo?.tgtDayHoursAfter} sa (+1 ders)
+                    </span>
+                    {dragHoverEval.unlockInfo?.sourceDay && (
+                      <span className="text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded">
+                        {dragHoverEval.unlockInfo.sourceDay}: {dragHoverEval.unlockInfo.srcDayHoursBefore} ➔ {dragHoverEval.unlockInfo.srcDayHoursAfter} sa (-1 ders)
+                      </span>
+                    )}
+                    <span>Pencere:</span>
+                    <span className="text-white font-extrabold bg-slate-800 px-1.5 py-0.5 rounded">
+                      {dragHoverEval.currentTotalGaps} ➔ {dragHoverEval.newTotalGaps}
+                    </span>
+                    {dragHoverEval.netGapChange < 0 ? (
+                      <span className="text-emerald-300 font-black bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-md animate-pulse">
+                        🌟 {Math.abs(dragHoverEval.netGapChange)} sa AZALIR
+                      </span>
+                    ) : dragHoverEval.netGapChange > 0 ? (
+                      <span className="text-rose-300 font-black bg-rose-950/80 border border-rose-500/40 px-2 py-0.5 rounded-md animate-pulse">
+                        ⚠️ {dragHoverEval.netGapChange} sa ARTAR
+                      </span>
+                    ) : (
+                      <span className="text-indigo-300 font-black bg-indigo-950/60 border border-indigo-500/30 px-2 py-0.5 rounded-md">
+                        ✓ DEĞİŞMEZ (±0)
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-amber-300/90 font-medium mt-1">
+                    💡 Bıraktığınızda onayınızla bu saat öğretmen için açılarak ders yerleştirilecektir.
+                  </div>
+                </div>
               ) : (
                 <div className="text-xs text-rose-400 font-bold mt-1 flex items-center gap-1.5">
                   <span>⛔ Bu alana taşınamaz: {dragHoverEval.reason || 'Kısıt çakışması'}</span>
@@ -686,6 +784,9 @@ export default function TeacherTimetable({
       )}
 
 
+
+      {/* ⚡ LOKAL DAĞITIM VE ÖNİZLEME MODALI */}
+      <LocalRepairModal />
 
     </div>
   );

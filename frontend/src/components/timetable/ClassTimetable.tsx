@@ -344,13 +344,15 @@ export default function ClassTimetable({
                       }}
                       className={`min-h-[58px] rounded-xl transition-all relative ${
                         isHovered
-                          ? dragHoverTarget.isValid
-                            ? dragHoverTarget.netGapChange < 0
-                              ? 'ring-4 ring-emerald-500 bg-emerald-100/90 shadow-xl scale-[1.03] z-30 animate-pulse'
-                              : dragHoverTarget.netGapChange > 0
-                                ? 'ring-4 ring-rose-500 bg-rose-100/90 shadow-xl scale-[1.03] z-30 animate-pulse'
-                                : 'ring-3 ring-indigo-500 bg-indigo-100/80 shadow-md scale-[1.02] z-30'
-                            : 'ring-2 ring-rose-400 bg-rose-100/60 z-30'
+                          ? dragHoverTarget.isClosedSlot && dragHoverTarget.canUnlockWithConfirm
+                            ? 'ring-4 ring-amber-500 bg-amber-100/90 shadow-xl scale-[1.03] z-30 animate-pulse'
+                            : dragHoverTarget.isValid
+                              ? dragHoverTarget.netGapChange < 0
+                                ? 'ring-4 ring-emerald-500 bg-emerald-100/90 shadow-xl scale-[1.03] z-30 animate-pulse'
+                                : dragHoverTarget.netGapChange > 0
+                                  ? 'ring-4 ring-rose-500 bg-rose-100/90 shadow-xl scale-[1.03] z-30 animate-pulse'
+                                  : 'ring-3 ring-indigo-500 bg-indigo-100/80 shadow-md scale-[1.02] z-30'
+                              : 'ring-2 ring-rose-400 bg-rose-100/60 z-30'
                           : isCurrentSelected
                             ? 'ring-4 ring-indigo-500 ring-offset-1 shadow-lg scale-[1.02] z-20'
                             : isOpportunity
@@ -524,24 +526,32 @@ export default function ClassTimetable({
       {/* ⚡ CANLI SÜRÜKLE-BIRAK BİLGİ VE TOPLAM PENCERE DEĞİŞİM EKRANI (HUD) */}
       {draggedSource && (
         <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 text-white px-5 py-3.5 rounded-2xl shadow-2xl border backdrop-blur-md flex items-center gap-4 text-xs max-w-2xl w-[92%] animate-in fade-in slide-in-from-bottom-3 select-none transition-all ${
-          dragHoverTarget && dragHoverTarget.isValid
-            ? dragHoverTarget.netGapChange < 0
-              ? 'bg-slate-950/95 border-emerald-500 ring-2 ring-emerald-500/40 shadow-emerald-950/60'
-              : dragHoverTarget.netGapChange > 0
-                ? 'bg-slate-950/95 border-rose-500 ring-2 ring-rose-500/40 shadow-rose-950/60'
-                : 'bg-slate-950/95 border-slate-700/80'
-            : 'bg-slate-950/95 border-slate-700/80'
+          dragHoverTarget?.isClosedSlot && dragHoverTarget?.canUnlockWithConfirm
+            ? 'bg-slate-950/95 border-amber-500 ring-2 ring-amber-500/40 shadow-amber-950/60'
+            : dragHoverTarget && dragHoverTarget.isValid
+              ? dragHoverTarget.netGapChange < 0
+                ? 'bg-slate-950/95 border-emerald-500 ring-2 ring-emerald-500/40 shadow-emerald-950/60'
+                : dragHoverTarget.netGapChange > 0
+                  ? 'bg-slate-950/95 border-rose-500 ring-2 ring-rose-500/40 shadow-rose-950/60'
+                  : 'bg-slate-950/95 border-slate-700/80'
+              : 'bg-slate-950/95 border-slate-700/80'
         }`}>
           <div className={`p-2 rounded-xl shrink-0 transition-all ${
-            dragHoverTarget && dragHoverTarget.isValid
-              ? dragHoverTarget.netGapChange < 0
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 animate-pulse'
-                : dragHoverTarget.netGapChange > 0
-                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'
-                  : 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/30'
-              : 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/30'
+            dragHoverTarget?.isClosedSlot && dragHoverTarget?.canUnlockWithConfirm
+              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse'
+              : dragHoverTarget && dragHoverTarget.isValid
+                ? dragHoverTarget.netGapChange < 0
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 animate-pulse'
+                  : dragHoverTarget.netGapChange > 0
+                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'
+                    : 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/30'
+                : 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/30'
           }`}>
-            <ArrowRightLeft size={18} />
+            {dragHoverTarget?.isClosedSlot && dragHoverTarget?.canUnlockWithConfirm ? (
+              <Lock size={18} />
+            ) : (
+              <ArrowRightLeft size={18} />
+            )}
           </div>
 
           <div className="flex-1 min-w-0">
@@ -601,6 +611,43 @@ export default function ClassTimetable({
                       )}
                     </div>
                   )}
+                </div>
+              ) : dragHoverTarget.isClosedSlot && dragHoverTarget.canUnlockWithConfirm ? (
+                <div className="text-xs font-bold mt-1 leading-snug">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-amber-300 font-extrabold flex items-center gap-1">
+                      <Lock size={12} className="inline" /> Kapalı Slot (Açılabilir):
+                    </span>
+                    <span>{dragHoverTarget.unlockInfo?.teacherName} için {dragHoverTarget.day} {dragHoverTarget.period}. saat kapalıdır.</span>
+                    <span className="text-amber-200 bg-amber-950/80 border border-amber-500/40 px-2 py-0.5 rounded-md">
+                      {dragHoverTarget.day}: {dragHoverTarget.unlockInfo?.tgtDayHoursBefore} ➔ {dragHoverTarget.unlockInfo?.tgtDayHoursAfter} sa (+1 ders)
+                    </span>
+                    {dragHoverTarget.unlockInfo?.sourceDay && (
+                      <span className="text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded">
+                        {dragHoverTarget.unlockInfo.sourceDay}: {dragHoverTarget.unlockInfo.srcDayHoursBefore} ➔ {dragHoverTarget.unlockInfo.srcDayHoursAfter} sa (-1 ders)
+                      </span>
+                    )}
+                    <span>Pencere:</span>
+                    <span className="text-white font-extrabold bg-slate-800 px-1.5 py-0.5 rounded">
+                      {dragHoverTarget.currentTotalGaps} ➔ {dragHoverTarget.newTotalGaps}
+                    </span>
+                    {dragHoverTarget.netGapChange < 0 ? (
+                      <span className="text-emerald-300 font-black bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-md animate-pulse">
+                        🌟 {Math.abs(dragHoverTarget.netGapChange)} sa AZALIR
+                      </span>
+                    ) : dragHoverTarget.netGapChange > 0 ? (
+                      <span className="text-rose-300 font-black bg-rose-950/80 border border-rose-500/40 px-2 py-0.5 rounded-md animate-pulse">
+                        ⚠️ {dragHoverTarget.netGapChange} sa ARTAR
+                      </span>
+                    ) : (
+                      <span className="text-indigo-300 font-black bg-indigo-950/60 border border-indigo-500/30 px-2 py-0.5 rounded-md">
+                        ✓ DEĞİŞMEZ (±0)
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-amber-300/90 font-medium mt-1">
+                    💡 Bıraktığınızda onayınızla bu saat öğretmen için açılarak ders yerleştirilecektir.
+                  </div>
                 </div>
               ) : (
                 <div className="text-xs text-rose-400 font-bold mt-1 flex items-center gap-1.5">

@@ -5,6 +5,12 @@ import { solveDykSchedule } from '../utils/dykEngine';
 import { solveExamSchedule, solveSupervisors, DEFAULT_EXAM_SUBJECTS, buildScheduleFromPlacements } from '../utils/examEngine';
 import { generateCourseCode } from '../utils/courseCodeHelper';
 import { APP_VERSION } from '../config/version';
+import {
+  getTeacherClassIds,
+  buildNeighborhoodPins,
+  calculateTimetableDiff,
+  type LocalRepairDiffResult
+} from '../utils/localRepairEngine';
 import type {
   DemoDataChoice,
   Settings,
@@ -511,11 +517,17 @@ export const calculateLiveRelaxedRules = (
   if (!timetable || Object.keys(timetable).length === 0) return relaxedRules;
 
   const days = settings?.days || ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"];
-  const maxGaps = hardPrefs?.maxGapsPerDay ?? 2;
+  const maxTotalGaps = hardPrefs?.maxTotalGaps ?? 4;
+  const maxTotalLevel = hardPrefs?.maxTotalGapsLevel ?? (hardPrefs?.enforceMaxTotalGaps !== false ? 'medium' : 'off');
+  const minTotalGaps = hardPrefs?.minTotalGaps ?? 0;
+  const minTotalLevel = hardPrefs?.minTotalGapsLevel ?? 'off';
+  const enforceMaxTotal = maxTotalLevel !== 'off' && hardPrefs?.enforceMaxTotalGaps !== false;
+  const enforceMinTotal = minTotalLevel !== 'off' && minTotalGaps > 0;
   const minDaily = hardPrefs?.minDailyHours ?? 3;
-  const enforceGaps = hardPrefs?.enforceMaxGaps !== false;
   const enforceBalance = hardPrefs?.enforceDailyBalance !== false;
   const enforceConsecutive = hardPrefs?.enforceConsecutiveClassRules !== false;
+  const enforceIntensive = hardPrefs?.enforceIntensiveRules !== false;
+  const maxIntensive = hardPrefs?.maxHoursPerIntensiveCourse ?? 4;
 
   const teacherMap = {};
   const teacherLoads = {};
@@ -619,6 +631,36 @@ export const calculateLiveRelaxedRules = (
     });
   }
 
+  // 1b. Yoğun Ders Günlük Tavan Sınırı Esnetmeleri (Haftalık > 6 saat olan dersler için)
+  if (enforceIntensive) {
+    (classrooms || []).forEach(c => {
+      const intensiveCourses = (c.courses || []).filter(co => Number(co.hoursPerWeek) > 6);
+      if (intensiveCourses.length === 0) return;
+      const cDays = timetable[c.id] || {};
+
+      intensiveCourses.forEach(co => {
+        days.forEach(d => {
+          const slots = (cDays[d] || []).filter(s => s.subject === co.subject && (!co.teacherId || s.teacherId === co.teacherId));
+          if (slots.length > maxIntensive) {
+            const tObj = teacherMap[co.teacherId];
+            const tName = tObj?.name || 'Öğretmen';
+            const desc = `${c.name} – ${co.subject} (${tName}): ${d} günü ${slots.length} saat ders yerleşti (azami sınır: ${maxIntensive} saat).`;
+            relaxedRules.push({
+              teacherId: co.teacherId,
+              teacherName: tName,
+              classId: c.id,
+              className: c.name,
+              subject: co.subject,
+              day: d,
+              ruleType: 'Yoğun Ders Günlük Tavan Esnetmesi',
+              description: desc
+            });
+          }
+        });
+      });
+    });
+  }
+
   // 2. Öğretmen Bazlı Pencere, Asgari Saat ve Esnek Boş Gün Esnetmeleri
   const teacherBusy: Record<string, Record<string, number[]>> = {};
   (teachers || []).forEach(t => {
@@ -643,34 +685,67 @@ export const calculateLiveRelaxedRules = (
     const exempt = isTeacherExemptOrPartTime(t.id);
     const hours = {};
 
+    let teacherTotalGaps = 0;
     days.forEach(d => {
       const uniquePeriods = Array.from(new Set(teacherBusy[t.id]?.[d] || [])).sort((a, b) => a - b);
       hours[d] = uniquePeriods.length;
       if (uniquePeriods.length > 1) {
         const span = uniquePeriods[uniquePeriods.length - 1] - uniquePeriods[0] + 1;
         const g = span - uniquePeriods.length;
-        if (!exempt && enforceGaps && g > maxGaps) {
-          const desc = `${t.name} – ${d}: ${g} saat pencere oluştu (normal sınır: en fazla ${maxGaps} boşluk).`;
-          relaxedRules.push({
-            teacherId: t.id,
-            teacherName: t.name,
-            classId: null,
-            className: null,
-            subject: t.branch,
-            day: d,
-            ruleType: 'Günlük Azami Pencere Esnetmesi',
-            description: desc
-          });
-        }
+        teacherTotalGaps += g;
       }
     });
 
+    const closedSlots = Object.values(t.unavailable || {}).reduce((acc: number, arr: any) => acc + (Array.isArray(arr) ? arr.length : 0), 0);
+    const teacherOpenSlots = (days.length * numPeriods) - closedSlots;
+    const tFreeCapacity = Math.max(0, teacherOpenSlots - load);
+    const isUserGapExempt = (hardPrefs?.gapExemptTeacherIds || []).includes(t.id);
+
+    if (!exempt && !isUserGapExempt && enforceMaxTotal && teacherTotalGaps > maxTotalGaps) {
+      const desc = `${t.name}: Haftalık toplam ${teacherTotalGaps} saat pencere oluştu (azami sınır: en fazla ${maxTotalGaps} saat).`;
+      relaxedRules.push({
+        teacherId: t.id,
+        teacherName: t.name,
+        classId: null,
+        className: null,
+        subject: t.branch,
+        day: 'Haftalık',
+        ruleType: 'Haftalık Toplam Azami Pencere Esnetmesi',
+        description: desc
+      });
+    }
+
+    if (!exempt && !isUserGapExempt && enforceMinTotal && load >= 10) {
+      if (tFreeCapacity >= minTotalGaps && teacherTotalGaps < minTotalGaps) {
+        const desc = `${t.name}: Haftalık toplam ${teacherTotalGaps} saat pencere oluştu (asgari şart: en az ${minTotalGaps} saat boşluk).`;
+        relaxedRules.push({
+          teacherId: t.id,
+          teacherName: t.name,
+          classId: null,
+          className: null,
+          subject: t.branch,
+          day: 'Haftalık',
+          ruleType: 'Haftalık Toplam Asgari Pencere Esnetmesi',
+          description: desc
+        });
+      }
+    }
+
     const activeDays = days.filter(d => (hours[d] || 0) > 0);
-    if (!exempt && enforceBalance) {
+    if (!exempt && enforceBalance && load > 0) {
       const adaptiveMin = Math.min(minDaily, load);
+      const rem = load % adaptiveMin;
+      const daysBelowMin = activeDays.filter(d => (hours[d] || 0) < adaptiveMin);
+      const hasSingleRemDay = rem > 0 && daysBelowMin.length === 1;
+
       activeDays.forEach(d => {
-        if (hours[d] < adaptiveMin) {
-          const desc = `${t.name} – ${d}: Günde ${hours[d]} saat ders yerleşti (asgari ${adaptiveMin} saat kuralı esnetildi).`;
+        const h = hours[d] || 0;
+        if (h < adaptiveMin) {
+          if (hasSingleRemDay && h === rem) {
+            // Matematiksel artık ders (ör. 14 saatin 4 güne 4+4+4+2 dağılması): kural esnetmesi değil
+            return;
+          }
+          const desc = `${t.name} – ${d}: Günde ${h} saat ders yerleşti (asgari ${adaptiveMin} saat kuralı esnetildi).`;
           relaxedRules.push({
             teacherId: t.id,
             teacherName: t.name,
@@ -686,6 +761,27 @@ export const calculateLiveRelaxedRules = (
     }
 
     const fDay = t.floatingConstraints?.freeDayPreference || 'none';
+    const enforceMinActiveDays = hardPrefs?.enforceMinActiveDays !== false && (hardPrefs?.minActiveDaysLevel ?? 'high') !== 'off' && Number(hardPrefs?.minActiveDays ?? 4) > 0;
+    const minActiveDaysTarget = Number(hardPrefs?.minActiveDays ?? 4);
+    const isUserMinDaysExempt = (hardPrefs?.minDaysExemptTeacherIds || []).includes(t.id);
+    if (!exempt && !isUserMinDaysExempt && fDay !== 'floating_2_days' && enforceMinActiveDays && load > 0) {
+      const openD = teacherOpenDays[t.id] ?? days.length;
+      const maxPossibleDays = Math.min(openD, Math.max(1, Math.floor(load / 2)));
+      const effMinActiveDays = Math.min(minActiveDaysTarget, maxPossibleDays);
+      if (activeDays.length < effMinActiveDays) {
+        const desc = `${t.name}: Haftada ${activeDays.length} güne ders yerleşti (asgari ${effMinActiveDays} aktif gün kuralı esnetildi).`;
+        relaxedRules.push({
+          teacherId: t.id,
+          teacherName: t.name,
+          classId: null,
+          className: null,
+          subject: t.branch,
+          day: 'Haftalık',
+          ruleType: 'Haftalık Asgari Ders Günü Esnetmesi',
+          description: desc
+        });
+      }
+    }
     if (fDay === 'floating_1_day' && activeDays.length > days.length - 1) {
       const desc = `${t.name}: 1 gün esnek boş gün tercihi esnetildi (${activeDays.length} güne ders yerleşti).`;
       relaxedRules.push({
@@ -712,6 +808,50 @@ export const calculateLiveRelaxedRules = (
       });
     }
   });
+
+  // 3. Saatlik Yedek / Nöbetçi Öğretmen Güvencesi Denetimi (İlk ve son saat hariç tüm ara saatler: 2 .. P-1)
+  const hourlyReserveLevel = hardPrefs?.hourlyReserveLevel ?? 'off';
+  const minHourlyReserve = Number(hardPrefs?.minHourlyReserveTeachers ?? 1);
+  const enforceHourlyReserve = Boolean(hardPrefs?.enforceHourlyReserve) && hourlyReserveLevel !== 'off' && minHourlyReserve > 0;
+  if (enforceHourlyReserve && numPeriods >= 3) {
+    const gapExemptIds = new Set(hardPrefs?.gapExemptTeacherIds || []);
+    const eligTeachers = (teachers || []).filter(t => {
+      const load = teacherLoads[t.id] || 0;
+      return load > 0 && !t.isAdministrator && !isTeacherExemptOrPartTime(t.id) && !gapExemptIds.has(t.id);
+    });
+    days.forEach(d => {
+      for (let p = 2; p < numPeriods; p++) {
+        let inGapCount = 0;
+        let freePresentCount = 0;
+        eligTeachers.forEach(t => {
+          const ps = Array.from(new Set(teacherBusy[t.id]?.[d] || [])).sort((a, b) => a - b);
+          const closed = t.unavailable?.[d] || [];
+          const isClosedAtP = closed.includes(p);
+          const hasLessonAtP = ps.includes(p);
+
+          if (ps.length >= 2 && ps[0] < p && p < ps[ps.length - 1] && !hasLessonAtP) {
+            inGapCount++;
+          }
+          if (ps.length > 0 && !isClosedAtP && !hasLessonAtP) {
+            freePresentCount++;
+          }
+        });
+        if (inGapCount < minHourlyReserve && freePresentCount < minHourlyReserve) {
+          const desc = `${d} günü ${p}. ders saatinde okulda boşta (pencerede) ${inGapCount} öğretmen bulundu (hedef: en az ${minHourlyReserve} öğretmen).`;
+          relaxedRules.push({
+            teacherId: null,
+            teacherName: 'Okul Geneli',
+            classId: null,
+            className: null,
+            subject: `${p}. Ders Saati`,
+            day: d,
+            ruleType: 'Saatlik Yedek Öğretmen Esnetmesi',
+            description: desc
+          });
+        }
+      }
+    });
+  }
 
   return relaxedRules;
 };
@@ -820,6 +960,16 @@ export interface AppState {
   setGenerateResult: (result: GenerateResult | null) => void;
   startGeneration: () => Promise<void>;
   stopGeneration: () => Promise<void>;
+  isLocalRepairing: boolean;
+  localRepairPreview: {
+    targetTeacherId: string;
+    newTimetable: Timetable;
+    diff: LocalRepairDiffResult;
+  } | null;
+  localRepairError: string | null;
+  startLocalRepair: (teacherId: string) => Promise<{ success: boolean; message?: string }>;
+  applyLocalRepair: () => void;
+  cancelLocalRepair: () => void;
   saveCurrentSchoolSnapshot: () => void;
   downloadSchoolBackup: () => void;
   loadHzAyseDemoData: () => void;
@@ -905,11 +1055,40 @@ export const useAppStore = create<AppState>()(
         earlyStart: true,
         earlyStartPenalty: 20,
         avoidStemLate: true,
-        stemLatePenalty: 35
+        stemLatePenalty: 35,
+        maxTotalGapsLevel: 'medium',
+        maxTotalGapsPenalty: 60,
+        minTotalGapsLevel: 'off',
+        minTotalGapsPenalty: 0,
+        gapExemptTeacherIds: [],
+        hourlyReserveLevel: 'off',
+        hourlyReservePenalty: 0,
+        minActiveDaysLevel: 'high',
+        minActiveDaysPenalty: 100,
+        minDaysExemptTeacherIds: []
       },
       updateSoftPrefs: (newPrefs) => set((state) => ({ softPrefs: { ...state.softPrefs, ...newPrefs } })),
 
       hardPrefs: {
+        enforceMaxTotalGaps: true,
+        maxTotalGaps: 4,
+        maxTotalGapsLevel: 'medium',
+        maxTotalGapsPenalty: 60,
+        enforceMinTotalGaps: false,
+        minTotalGaps: 0,
+        minTotalGapsLevel: 'off',
+        minTotalGapsPenalty: 0,
+        gapExemptTeacherIds: [],
+        enforceHourlyReserve: false,
+        minHourlyReserveTeachers: 1,
+        hourlyReserveLevel: 'off',
+        hourlyReservePenalty: 0,
+        enforceCategoricalFairness: true,
+        enforceMinActiveDays: true,
+        minActiveDays: 4,
+        minActiveDaysLevel: 'high',
+        minActiveDaysPenalty: 100,
+        minDaysExemptTeacherIds: [],
         enforceMaxGaps: true,
         maxGapsPerDay: 2,
         enforceDailyBalance: true,
@@ -1047,6 +1226,9 @@ export const useAppStore = create<AppState>()(
 
       isGenerating: false,
       isStopping: false,
+      isLocalRepairing: false,
+      localRepairPreview: null,
+      localRepairError: null,
       generateResult: null,
       setGenerateResult: (result) => set({ generateResult: result }),
 
@@ -1172,6 +1354,140 @@ export const useAppStore = create<AppState>()(
             isStopping: false
           });
         }
+      },
+
+      startLocalRepair: async (teacherId: string) => {
+        const { settings, teachers, classrooms, softPrefs, hardPrefs, pinnedSlots, timetable, isGenerating, isLocalRepairing } = get();
+
+        if (isGenerating || isLocalRepairing) {
+          return { success: false, message: 'Şu anda başka bir dağıtım işlemi çalışıyor.' };
+        }
+
+        if (!settings?.days || settings.days.length === 0) {
+          const msg = 'Okul Ayarları Eksik (Günler tanımlanmamış).';
+          set({ localRepairError: msg });
+          return { success: false, message: msg };
+        }
+
+        if (!timetable || Object.keys(timetable).length === 0) {
+          const msg = 'Lokal onarım için önce okul genelinde dağıtılmış bir program bulunmalıdır.';
+          set({ localRepairError: msg });
+          return { success: false, message: msg };
+        }
+
+        const targetTeacher = teachers.find((t) => t.id === teacherId);
+        if (!targetTeacher) {
+          const msg = 'Seçilen öğretmen sistemde bulunamadı.';
+          set({ localRepairError: msg });
+          return { success: false, message: msg };
+        }
+
+        const targetClassIds = getTeacherClassIds(teacherId, timetable, classrooms);
+        if (targetClassIds.length === 0) {
+          const msg = `${targetTeacher.name} öğretmenine ait ders veya sınıf bulunamadı.`;
+          set({ localRepairError: msg });
+          return { success: false, message: msg };
+        }
+
+        set({ isLocalRepairing: true, localRepairError: null, localRepairPreview: null });
+
+        try {
+          // 1. Etki alanı kilit matrisini üret (Hedef sınıflar haricindeki tüm okul dondurulur)
+          const neighborhoodPins = buildNeighborhoodPins(targetClassIds, timetable, pinnedSlots || []);
+
+          // 2. CP-SAT motorunu çağır
+          const targetApiUrl = await resolveSolverApiUrl();
+          const response = await fetch(`${targetApiUrl}/solve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              settings,
+              teachers,
+              classrooms,
+              softConstraints: softPrefs,
+              hardConstraints: {
+                ...hardPrefs,
+                solverTimeout: Math.min(hardPrefs?.solverTimeout || 60, 25)
+              },
+              pinnedSlots: neighborhoodPins
+            })
+          });
+
+          if (!response.ok) {
+            let errorMsg = `Sunucu Hatası (${response.status})`;
+            try {
+              const errData = await response.json();
+              errorMsg = errData.detail || errData.message || errorMsg;
+            } catch {
+              // ignore
+            }
+            set({
+              isLocalRepairing: false,
+              localRepairError: errorMsg
+            });
+            return { success: false, message: errorMsg };
+          }
+
+          const data = await response.json();
+
+          if (data.status === 'ok') {
+            const diff = calculateTimetableDiff(
+              teacherId,
+              timetable,
+              data.timetable,
+              teachers,
+              classrooms,
+              settings.days
+            );
+
+            set({
+              isLocalRepairing: false,
+              localRepairPreview: {
+                targetTeacherId: teacherId,
+                newTimetable: data.timetable,
+                diff
+              },
+              localRepairError: null
+            });
+            return { success: true };
+          } else {
+            const errorMsg = data.detail || data.message || 'Lokal Dağıtım Yapılamadı (Sınırlı alanda geçerli takas bulunamadı).';
+            set({
+              isLocalRepairing: false,
+              localRepairError: errorMsg
+            });
+            return { success: false, message: errorMsg };
+          }
+        } catch (err: any) {
+          const errorMsg = err?.message || 'Lokal onarım sırasında bağlantı veya sunucu hatası oluştu.';
+          set({
+            isLocalRepairing: false,
+            localRepairError: errorMsg
+          });
+          return { success: false, message: errorMsg };
+        }
+      },
+
+      applyLocalRepair: () => {
+        const { localRepairPreview, saveCurrentSchoolSnapshot } = get();
+        if (!localRepairPreview) return;
+
+        // Değişikliği uygulamadan önce anlık otomatik snapshot yedekle
+        saveCurrentSchoolSnapshot();
+
+        set({
+          timetable: localRepairPreview.newTimetable,
+          localRepairPreview: null,
+          localRepairError: null
+        });
+      },
+
+      cancelLocalRepair: () => {
+        set({
+          localRepairPreview: null,
+          localRepairError: null,
+          isLocalRepairing: false
+        });
       },
 
       // 💾 OKUL VERİLERİ ANLIK YEDEĞİ (Otomatik Snapshot)

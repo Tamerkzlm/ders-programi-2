@@ -1,16 +1,19 @@
 // frontend/src/pages/TimetableBoard.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useNavigate, useLocation } from 'react-router-dom'; 
-import { Calendar, Users, GraduationCap, AlertCircle, AlertTriangle, ArrowLeft, Undo2, Redo2, Pin, Play, FileSpreadsheet, RotateCcw } from 'lucide-react';
+import { Calendar, Users, GraduationCap, AlertCircle, AlertTriangle, ArrowLeft, Undo2, Redo2, Pin, Play, FileSpreadsheet, RotateCcw, ShieldCheck, ChevronDown, ChevronUp, ShieldAlert, CheckCircle2, X } from 'lucide-react';
 import TeacherTimetable from '../components/timetable/TeacherTimetable';
 import ClassTimetable from '../components/timetable/ClassTimetable';
 import MasterSheet from '../components/timetable/MasterSheet';
+import UnlockClosedSlotModal, { UnlockInfo } from '../components/timetable/UnlockClosedSlotModal';
+import { evaluateSwapOrMove } from '../utils/smartSwapEngine';
 
 export default function TimetableBoard() {
   const { 
     settings, 
     teachers, 
+    updateTeacher,
     classrooms, 
     timetable, 
     setTimetable, 
@@ -20,7 +23,8 @@ export default function TimetableBoard() {
     clearAllPins,
     setPinnedSlots,
     generateResult,
-    resetTimetable
+    resetTimetable,
+    hardPrefs
   } = useAppStore();
 
   const navigate = useNavigate(); 
@@ -33,6 +37,14 @@ export default function TimetableBoard() {
   const [activeTeacherId, setActiveTeacherId] = useState(incomingTeacherId || teachers[0]?.id || '');
   const [alertMsg, setAlertMsg] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showReservePanel, setShowReservePanel] = useState(false);
+  const [showRulesDrawer, setShowRulesDrawer] = useState(false);
+  const [pendingUnlock, setPendingUnlock] = useState<{
+    classId: string;
+    source: any;
+    target: any;
+    unlockInfo: UnlockInfo;
+  } | null>(null);
 
   useEffect(() => {
     if (incomingTeacherId) {
@@ -106,6 +118,85 @@ export default function TimetableBoard() {
   const periodsArray = Array.from({ length: numPeriods }, (_, i) => i + 1);
   const daysArray = settings?.days || [];
 
+  // 🛡️ SAATLİK YEDEK / NÖBETÇİ ÖĞRETMEN ÇİZELGESİ (İLK VE SON SAAT HARİÇ: 2 .. P-1)
+  const hourlyReserveData = useMemo(() => {
+    const middlePeriods = periodsArray.filter(p => p > 1 && p < numPeriods);
+    if (!timetable || Object.keys(timetable).length === 0 || middlePeriods.length === 0) {
+      return { middlePeriods, byDay: {} as Record<string, Record<number, { id: string; name: string; branch: string }[]>>, uncoveredSlots: 0, totalSlots: 0 };
+    }
+
+    const teacherLoads: Record<string, number> = {};
+    (classrooms || []).forEach(c => {
+      (c.courses || []).forEach(co => {
+        if (co.teacherId) {
+          teacherLoads[co.teacherId] = (teacherLoads[co.teacherId] || 0) + (Number(co.hoursPerWeek) || 0);
+        }
+      });
+    });
+
+    const gapExemptIds = new Set(hardPrefs?.gapExemptTeacherIds || []);
+    const eligTeachers = (teachers || []).filter(t => {
+      const load = teacherLoads[t.id] || 0;
+      const openDays = daysArray.filter(d => (t.unavailable?.[d] || []).length < numPeriods).length;
+      const isPartTime = (openDays <= 2 && load < 17) || (Boolean(t.isExempt) && load < 17);
+      const isExempt = Boolean(t.isExempt) || load <= 8 || isPartTime || Boolean(t.isAdministrator);
+      return load > 0 && !t.isAdministrator && !isExempt && !gapExemptIds.has(t.id);
+    });
+
+    const busyMap: Record<string, Record<string, number[]>> = {};
+    eligTeachers.forEach(t => {
+      busyMap[t.id] = {};
+      daysArray.forEach(d => { busyMap[t.id][d] = []; });
+    });
+
+    Object.keys(timetable).forEach(cId => {
+      const cDays = timetable[cId] || {};
+      daysArray.forEach(d => {
+        (cDays[d] || []).forEach(slot => {
+          if (slot.teacherId && busyMap[slot.teacherId]?.[d]) {
+            busyMap[slot.teacherId][d].push(Number(slot.period));
+          }
+        });
+      });
+    });
+
+    const byDay: Record<string, Record<number, { id: string; name: string; branch: string }[]>> = {};
+    let uncoveredSlots = 0;
+    let totalSlots = 0;
+    const minTarget = Math.max(1, Number(hardPrefs?.minHourlyReserveTeachers || 1));
+
+    daysArray.forEach(d => {
+      byDay[d] = {};
+      middlePeriods.forEach(p => {
+        totalSlots++;
+        const list: { id: string; name: string; branch: string }[] = [];
+        eligTeachers.forEach(t => {
+          const ps = Array.from(new Set(busyMap[t.id]?.[d] || [])).sort((a, b) => a - b);
+          if (ps.length >= 2 && ps[0] < p && p < ps[ps.length - 1] && !ps.includes(p)) {
+            list.push({ id: t.id, name: t.name, branch: t.branch });
+          }
+        });
+        byDay[d][p] = list;
+        if (list.length < minTarget) {
+          uncoveredSlots++;
+        }
+      });
+    });
+
+    return { middlePeriods, byDay, uncoveredSlots, totalSlots, minTarget };
+  }, [timetable, teachers, classrooms, daysArray, periodsArray, numPeriods, hardPrefs]);
+
+  // 📋 CANLI KURAL ESNETME VE İHLAL LİSTESİ (Manuel düzenlemede anında güncellenir)
+  const relaxedRulesList = useMemo(() => {
+    return generateResult?.metrics?.relaxedRules || [];
+  }, [generateResult?.metrics?.relaxedRules]);
+
+  const warningsList = useMemo(() => {
+    return (generateResult?.warnings || []).filter(w => !w.includes('Tüm Saatler Dolu') && !w.includes('başarıyla'));
+  }, [generateResult?.warnings]);
+
+  const totalIssuesCount = relaxedRulesList.length + warningsList.length;
+
   if (!timetable || Object.keys(timetable).length === 0) {
     return (
       <div className="p-6 max-w-4xl mx-auto text-center space-y-4">
@@ -133,25 +224,16 @@ export default function TimetableBoard() {
       role = 'Sürüklenen ders',
       ignoreClassId = null,
       ignoreDay = null,
-      ignorePeriod = null
+      ignorePeriod = null,
+      allowClosed = false
     } = options;
 
     const teacherObj = teachers.find(t => t.id === teacherId);
-    if (!teacherObj) return { valid: true };
+    if (!teacherObj) return { valid: true, isClosedSlot: false, hasConflict: false };
 
     const pNum = Number(targetPeriod);
 
-    // KURAL A: Öğretmenin Kısıtlı / Kapalı Saat Kontrolü (Müsaitlik)
-    const dayUnavailable = teacherObj.unavailable?.[targetDay] || [];
-    const isClosed = dayUnavailable.some(p => Number(p) === pNum);
-    if (isClosed) {
-      return { 
-        valid: false, 
-        message: `⚠️ Müsaitlik Engeli: ${teacherObj.name} (${role}) ${targetDay} günü ${pNum}. ders saatinde KISITLI / KAPALI!` 
-      };
-    }
-
-    // KURAL B: Öğretmenin Başka Bir Sınıfta Dersi Olma Durumu (Çakışma)
+    // KURAL A: Öğretmenin Başka Bir Sınıfta Dersi Olma Durumu (Çakışma - Kesin Engel)
     for (const cId of Object.keys(timetable)) {
       if (cId !== classId) {
         const slots = timetable[cId]?.[targetDay] || [];
@@ -166,13 +248,28 @@ export default function TimetableBoard() {
           const conflictClass = classrooms.find(c => c.id === cId)?.name || 'Başka Sınıf';
           return { 
             valid: false, 
+            hasConflict: true,
+            isClosedSlot: false,
             message: `🚨 Çakışma Hatası: ${teacherObj.name} (${role}) zaten ${targetDay} günü ${pNum}. derste ${conflictClass} sınıfında derste!` 
           };
         }
       }
     }
 
-    return { valid: true };
+    // KURAL B: Öğretmenin Kısıtlı / Kapalı Saat Kontrolü (Müsaitlik - Onayla Açılabilir)
+    const dayUnavailable = teacherObj.unavailable?.[targetDay] || [];
+    const isClosed = dayUnavailable.some(p => Number(p) === pNum);
+    if (isClosed && !allowClosed) {
+      return { 
+        valid: false, 
+        hasConflict: false,
+        isClosedSlot: true,
+        teacher: teacherObj,
+        message: `⚠️ Müsaitlik Engeli: ${teacherObj.name} (${role}) ${targetDay} günü ${pNum}. ders saatinde KISITLI / KAPALI!` 
+      };
+    }
+
+    return { valid: true, hasConflict: false, isClosedSlot: false };
   };
 
   // 2. Günlük Azami Ders Saati Kontrolü
@@ -202,7 +299,7 @@ export default function TimetableBoard() {
   };
 
   // 3. Sürükle Bırak / Yer Değiştirme Yöneticisi
-  const handleCellMoveOrSwap = (classId, source, target) => {
+  const handleCellMoveOrSwap = (classId, source, target, forceUnlock = false) => {
     setAlertMsg(null);
     const updatedTimetable = JSON.parse(JSON.stringify(timetable));
 
@@ -236,15 +333,34 @@ export default function TimetableBoard() {
       role: 'Sürüklenen ders',
       ignoreClassId: srcClassId,
       ignoreDay: srcDay,
-      ignorePeriod: srcPeriod
+      ignorePeriod: srcPeriod,
+      allowClosed: forceUnlock
     });
     if (!srcValidation.valid) {
+      if (!forceUnlock && srcValidation.isClosedSlot && !srcValidation.hasConflict) {
+        const evalRes = evaluateSwapOrMove({
+          source,
+          target: { classId: tgtClassId, day: tgtDay, period: tgtPeriod },
+          timetable,
+          teachers,
+          settings: { days: daysArray, periodsPerDay: periodsArray.length }
+        });
+        if (evalRes?.unlockInfo) {
+          setPendingUnlock({
+            classId,
+            source,
+            target,
+            unlockInfo: evalRes.unlockInfo
+          });
+          return;
+        }
+      }
       setAlertMsg(srcValidation.message);
       return;
     }
 
     // KONTROL 3: Sürüklenen dersin öğretmeni için günlük limit aşımı
-    if (source.fromPool || srcDay !== tgtDay) {
+    if ((source.fromPool || srcDay !== tgtDay) && !forceUnlock) {
       const isTargetSameTeacher = targetData && targetData.teacherId === srcTeacherId;
       if (!isTargetSameTeacher) {
         const capValidation = checkTeacherDailyCap(srcTeacherId, tgtDay, true);
@@ -264,15 +380,34 @@ export default function TimetableBoard() {
         role: 'Yer değiştiren ders',
         ignoreClassId: tgtClassId,
         ignoreDay: tgtDay,
-        ignorePeriod: tgtPeriod
+        ignorePeriod: tgtPeriod,
+        allowClosed: forceUnlock
       });
       if (!tgtValidation.valid) {
+        if (!forceUnlock && tgtValidation.isClosedSlot && !tgtValidation.hasConflict) {
+          const evalRes = evaluateSwapOrMove({
+            source,
+            target: { classId: tgtClassId, day: tgtDay, period: tgtPeriod },
+            timetable,
+            teachers,
+            settings: { days: daysArray, periodsPerDay: periodsArray.length }
+          });
+          if (evalRes?.unlockInfo) {
+            setPendingUnlock({
+              classId,
+              source,
+              target,
+              unlockInfo: evalRes.unlockInfo
+            });
+            return;
+          }
+        }
         setAlertMsg(`🔄 Yer Değiştirme Engeli: ${tgtValidation.message}`);
         return;
       }
 
       // Hedefteki öğretmenin kaynak günde günlük limiti:
-      if (srcDay !== tgtDay && tgtTeacherId !== srcTeacherId) {
+      if (srcDay !== tgtDay && tgtTeacherId !== srcTeacherId && !forceUnlock) {
         const tgtCapValidation = checkTeacherDailyCap(tgtTeacherId, srcDay, true);
         if (!tgtCapValidation.valid) {
           setAlertMsg(`🔄 Yer Değiştirme Engeli: ${tgtCapValidation.message}`);
@@ -366,6 +501,42 @@ export default function TimetableBoard() {
     }
 
     applyTimetableChange(updatedTimetable);
+  };
+
+  // 🔓 Kapalı Slot Açma ve Taşıma Onayı
+  const confirmUnlockAndMove = () => {
+    if (!pendingUnlock) return;
+    const { classId, source, target, unlockInfo } = pendingUnlock;
+
+    // 1. Kaynak öğretmenin kapalı saatini aç
+    const srcT = teachers.find(t => t.id === unlockInfo.teacherId);
+    if (srcT) {
+      const existing = srcT.unavailable || {};
+      const dayList = existing[unlockInfo.targetDay] || [];
+      const updatedDayList = dayList.filter(p => Number(p) !== Number(unlockInfo.targetPeriod));
+      updateTeacher(srcT.id, {
+        unavailable: { ...existing, [unlockInfo.targetDay]: updatedDayList }
+      });
+    }
+
+    // 2. Eğer takas ise ve hedef öğretmenin saati de kapalıysa onu da aç
+    if (unlockInfo.isSwap && unlockInfo.targetTeacherId && unlockInfo.sourceDay && unlockInfo.sourcePeriod) {
+      const tgtT = teachers.find(t => t.id === unlockInfo.targetTeacherId);
+      if (tgtT) {
+        const existing = tgtT.unavailable || {};
+        const dayList = existing[unlockInfo.sourceDay] || [];
+        const updatedDayList = dayList.filter(p => Number(p) !== Number(unlockInfo.sourcePeriod));
+        updateTeacher(tgtT.id, {
+          unavailable: { ...existing, [unlockInfo.sourceDay]: updatedDayList }
+        });
+      }
+    }
+
+    // 3. Taşıma / takası forceUnlock = true ile tamamla
+    handleCellMoveOrSwap(classId, source, target, true);
+
+    setAlertMsg(`✅ ${unlockInfo.teacherName} için ${unlockInfo.targetDay} ${unlockInfo.targetPeriod}. saat kısıtlaması kaldırıldı ve ders başarıyla yerleştirildi.`);
+    setPendingUnlock(null);
   };
 
   // Ders Silme Fonksiyonu (Silinen ders anında ilgili sınıf ve öğretmen havuzuna düşer)
@@ -539,6 +710,51 @@ export default function TimetableBoard() {
             </button>
           </div>
 
+          {/* 🛡️ SAATLİK YEDEK / NÖBETÇİ ÖĞRETMEN ÇİZELGESİ BUTONU */}
+          <button
+            type="button"
+            onClick={() => setShowReservePanel(!showReservePanel)}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shadow-xs ${
+              hourlyReserveData.uncoveredSlots === 0
+                ? 'bg-emerald-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100'
+                : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+            }`}
+            title="İlk ve son saat hariç ara derslerde (2..P-1) okulda boş dersi (penceresi) olan öğretmenleri görüntüle"
+          >
+            <ShieldCheck size={15} className={hourlyReserveData.uncoveredSlots === 0 ? 'text-emerald-600' : 'text-amber-600'} />
+            <span>
+              Yedek Öğretmenler (2..{Math.max(2, numPeriods - 1)}. Saat):{' '}
+              {hourlyReserveData.uncoveredSlots === 0
+                ? 'Tüm Saatler Dolu ✓'
+                : `${hourlyReserveData.uncoveredSlots} Saat Eksik`}
+            </span>
+            {showReservePanel ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+
+          {/* 📋 CANLI KURAL & İHLAL DURUMU BUTONU */}
+          <button
+            type="button"
+            onClick={() => setShowRulesDrawer(!showRulesDrawer)}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shadow-xs ${
+              totalIssuesCount === 0
+                ? 'bg-emerald-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100'
+                : relaxedRulesList.some(r => r.isCritical)
+                  ? 'bg-rose-50 text-rose-900 border-rose-300 hover:bg-rose-100 animate-pulse'
+                  : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+            }`}
+            title="Manuel düzenleme yaparken kural esnetmeleri ve çakışma ihlallerini anlık takip edin"
+          >
+            {totalIssuesCount === 0 ? (
+              <CheckCircle2 size={15} className="text-emerald-600" />
+            ) : (
+              <ShieldAlert size={15} className={relaxedRulesList.some(r => r.isCritical) ? "text-rose-600" : "text-amber-600"} />
+            )}
+            <span>
+              {totalIssuesCount === 0 ? 'Kural Uyumu: 0 İhlal ✓' : `${totalIssuesCount} Kural / İhlal Uyarısı`}
+            </span>
+            {showRulesDrawer ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+
 
 
           {/* 📌 KİLİTLİ DERSLER KONTROLÜ */}
@@ -583,6 +799,197 @@ export default function TimetableBoard() {
           >
             ✕ Kapat
           </button>
+        </div>
+      )}
+
+      {/* 📋 AÇILIR PANEL: CANLI KURAL ESNETME VE İHLAL DENETİM RAPORU */}
+      {showRulesDrawer && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 space-y-3 animate-in fade-in duration-200 print:hidden">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                <ShieldAlert size={17} className={totalIssuesCount === 0 ? "text-emerald-600" : "text-amber-600"} />
+                <span>Canlı Kural & İhlal Durumu Denetim Paneli</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Manuel düzenleme sırasında hücreleri kaydırdıkça çakışmalar ve kural uyumu anlık olarak hesaplanır.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`px-3 py-1 rounded-xl text-xs font-bold border ${
+                totalIssuesCount === 0
+                  ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                  : 'bg-amber-50 text-amber-900 border-amber-300'
+              }`}>
+                {totalIssuesCount === 0
+                  ? '✓ Tüm Kısıtlar ve Kurallar %100 Karşılandı (0 İhlal)'
+                  : `⚠️ Toplam ${totalIssuesCount} Kural Uyarısı / İhlali Mevcut`}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowRulesDrawer(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                title="Paneli Kapat"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+
+          {totalIssuesCount === 0 ? (
+            <div className="p-4 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center gap-3">
+              <CheckCircle2 size={24} className="text-emerald-600 shrink-0" />
+              <div>
+                <p className="text-xs font-black text-emerald-900">Mükemmel Uyum! Hiçbir Kural İhlali Bulunmuyor</p>
+                <p className="text-[11px] text-emerald-700 mt-0.5">
+                  Tüm öğretmenlerin günlük asgari ders saatleri, blok bitişiklikleri, ders çakışmaları ve okulun ara saat nöbetçi gereksinimleri tam olarak karşılanmaktadır.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {relaxedRulesList.map((rule, idx) => (
+                <div
+                  key={`rule-${idx}`}
+                  className={`p-2.5 rounded-xl border flex items-start justify-between gap-3 ${
+                    rule.isCritical
+                      ? 'bg-rose-50/70 border-rose-200 text-rose-900'
+                      : 'bg-amber-50/60 border-amber-200 text-amber-900'
+                  }`}
+                >
+                  <div className="flex items-start gap-2 min-w-0">
+                    <span className="text-sm mt-0.5">{rule.isCritical ? '🚨' : '🔧'}</span>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-black">{rule.ruleType}</span>
+                        {rule.teacherName && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 bg-white/80 rounded border border-slate-200">
+                            {rule.teacherName}
+                          </span>
+                        )}
+                        {rule.day && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 bg-white/80 rounded border border-slate-200">
+                            {rule.day}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs mt-0.5 opacity-90">{rule.description}</p>
+                    </div>
+                  </div>
+                  {rule.teacherId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTeacherId(rule.teacherId);
+                        setViewMode('teacher');
+                      }}
+                      className="text-[10px] font-bold px-2 py-1 bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-700 rounded-lg shadow-2xs transition-colors shrink-0 cursor-pointer"
+                    >
+                      Öğretmene Git →
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {warningsList.map((warn, idx) => (
+                <div
+                  key={`warn-${idx}`}
+                  className="p-2.5 rounded-xl border bg-slate-50 border-slate-200 text-slate-800 flex items-start gap-2"
+                >
+                  <AlertCircle size={15} className="text-slate-500 shrink-0 mt-0.5" />
+                  <p className="text-xs">{warn}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 🛡️ AÇILIR PANEL: SAATLİK YEDEK / NÖBETÇİ ÖĞRETMEN ÇİZELGESİ (2 .. P-1. SAATLER) */}
+      {showReservePanel && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 space-y-3 animate-in fade-in duration-200 print:hidden">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                <ShieldCheck size={17} className="text-emerald-600" />
+                <span>Saatlik Yedek / Boş Öğretmen Çizelgesi (İlk ve Son Saat Hariç: 2. – {Math.max(2, numPeriods - 1)}. Saatler)</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                İdareciler ve kısmi zamanlı/istisna öğretmenler hariç, ilgili saatte okulda olup iki dersi arasında boşluğu (penceresi) bulunan öğretmenleri gösterir.
+              </p>
+            </div>
+            <span className={`px-3 py-1 rounded-xl text-xs font-bold border ${
+              hourlyReserveData.uncoveredSlots === 0
+                ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                : 'bg-amber-50 text-amber-900 border-amber-300'
+            }`}>
+              {hourlyReserveData.uncoveredSlots === 0
+                ? `✓ Tüm Ara Saatlerde (${hourlyReserveData.totalSlots}/${hourlyReserveData.totalSlots}) En Az ${hourlyReserveData.minTarget || 1} Yedek Öğretmen Hazır`
+                : `⚠️ ${hourlyReserveData.totalSlots} Ara Saatin ${hourlyReserveData.uncoveredSlots} Tanesinde Yedek Öğretmen Eksik`}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-y border-slate-200 text-slate-700">
+                  <th className="py-2 px-3 text-left font-black w-28">Gün</th>
+                  {hourlyReserveData.middlePeriods.map(p => (
+                    <th key={p} className="py-2 px-2.5 text-left font-black border-l border-slate-200">
+                      {p}. Ders Saati
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {daysArray.map(d => (
+                  <tr key={d} className="border-b border-slate-100 hover:bg-slate-50/50">
+                    <td className="py-2.5 px-3 font-extrabold text-slate-900 whitespace-nowrap">{d}</td>
+                    {hourlyReserveData.middlePeriods.map(p => {
+                      const list = hourlyReserveData.byDay[d]?.[p] || [];
+                      const isOk = list.length >= (hourlyReserveData.minTarget || 1);
+                      return (
+                        <td
+                          key={p}
+                          className={`py-2 px-2.5 border-l border-slate-100 align-top ${
+                            isOk ? 'bg-emerald-50/25' : 'bg-rose-50/60'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <span className={`text-[11px] font-black px-1.5 py-0.5 rounded ${
+                              isOk ? 'bg-emerald-100 text-emerald-900' : 'bg-rose-100 text-rose-900'
+                            }`}>
+                              {list.length} Öğretmen
+                            </span>
+                          </div>
+                          {list.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {list.map(t => (
+                                <button
+                                  key={t.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveTeacherId(t.id);
+                                    setViewMode('teacher');
+                                  }}
+                                  className="text-[10px] font-semibold px-1.5 py-0.5 bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-700 rounded shadow-2xs transition-colors cursor-pointer truncate max-w-[140px]"
+                                  title={`${t.name} (${t.branch}) programına git`}
+                                >
+                                  {t.name}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-bold text-rose-600">Boşta öğretmen yok!</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -692,6 +1099,14 @@ export default function TimetableBoard() {
           </div>
         </div>
       )}
+      {/* 🔓 KAPALI SLOT AÇMA ONAY MODALI */}
+      <UnlockClosedSlotModal
+        isOpen={!!pendingUnlock}
+        onClose={() => setPendingUnlock(null)}
+        onConfirm={confirmUnlockAndMove}
+        unlockInfo={pendingUnlock?.unlockInfo || null}
+        targetClassName={classrooms.find(c => c.id === (pendingUnlock?.target?.classId || pendingUnlock?.classId))?.name}
+      />
     </div>
   );
 }
