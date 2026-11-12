@@ -33,6 +33,20 @@ from models import SolveRequest
 
 logger = logging.getLogger(__name__)
 
+def safe_print(msg: str, flush: bool = True):
+    """
+    I/O hatası (Errno 5 / stdout akış kopması / disk doluluğu) durumunda
+    çözücünün çökmesini önleyen dayanıklı loglama fonksiyonu.
+    """
+    try:
+        logger.info(msg)
+    except Exception:
+        pass
+    try:
+        print(msg, flush=flush)
+    except (OSError, IOError, BrokenPipeError):
+        pass
+
 FREE_DAY_W = 4  # B kademesi: fazladan gelinen her gün, yaklaşık 4 boşluk saatine denk ceza
 
 STEM_PATTERNS = [
@@ -124,7 +138,7 @@ def request_stop_solver() -> bool:
                 elif hasattr(active_s, "StopSearch"):
                     active_s.StopSearch()
             except Exception as e:
-                print(f"[solver] stop_search istisnası: {e}", flush=True)
+                safe_print(f"[solver] stop_search istisnası: {e}")
 
     if is_active:
         if sols > 0:
@@ -1053,7 +1067,7 @@ class _Progress(cp_model.CpSolverSolutionCallback):
                     total_gaps += (active_ps[-1] - active_ps[0] + 1) - len(active_ps)
         return total_gaps
 
-    def on_solution_callback(self):
+    def OnSolutionCallback(self):
         if _stop_event.is_set():
             try:
                 self.StopSearch()
@@ -1095,20 +1109,23 @@ class _Progress(cp_model.CpSolverSolutionCallback):
 
             if total_sols == 1:
                 gap_txt = f" (Başlangıç pencere sayısı: {live_gaps} saat)" if live_gaps is not None else ""
-                add_live_feed(f"✓ İlk geçerli çakışmasız çözüm bulundu!{gap_txt}", "success")
+                msg = f"✓ İlk geçerli çakışmasız çözüm bulundu!{gap_txt}"
+                add_live_feed(msg, "success")
+                safe_print(f"[solver-callback] {msg}")
             elif live_gaps is not None and prev_gaps is not None and live_gaps < prev_gaps:
-                add_live_feed(
-                    f"⚡ Çözüm #{total_sols} ({self.phase_label}): Okul toplam penceresi {prev_gaps} ➔ {live_gaps} saat seviyesine düşürüldü.",
-                    "improve"
-                )
+                msg = f"⚡ Çözüm #{total_sols} ({self.phase_label}): Okul toplam penceresi {prev_gaps} ➔ {live_gaps} saat seviyesine düşürüldü."
+                add_live_feed(msg, "improve")
+                safe_print(f"[solver-callback] {msg}")
             elif total_sols <= 6 or total_sols % 3 == 0:
                 gap_txt = f" (Toplam pencere: {live_gaps} saat)" if live_gaps is not None else ""
-                add_live_feed(
-                    f"🔄 Çözüm #{total_sols} ({self.phase_label}): Kural ve tercih puanı iyileştirildi{gap_txt}.",
-                    "info"
-                )
+                msg = f"🔄 Çözüm #{total_sols} ({self.phase_label}): Kural ve tercih puanı iyileştirildi{gap_txt}."
+                add_live_feed(msg, "info")
+                safe_print(f"[solver-callback] {msg}")
         except Exception:
             pass
+
+    # Hem Google OR-Tools C++ SWIG arayüzü (OnSolutionCallback) hem de Pythonic isim (on_solution_callback) desteği
+    on_solution_callback = OnSolutionCallback
 
 
 def run_solver(model, time_limit, workers, patience=None, busy_by_teacher=None, phase_label="Optimizasyon"):
@@ -1760,8 +1777,8 @@ def solve(request: SolveRequest):
             allow_soft_gaps=allow_soft_gaps
         )
         num_vars = len(model.Proto().variables)
-        print(f"[solver] model kuruldu {time.time() - start:.1f}s, işçi={workers}, "
-              f"değişken={num_vars}", flush=True)
+        safe_print(f"[solver] model kuruldu {time.time() - start:.1f}s, işçi={workers}, "
+                   f"değişken={num_vars}")
 
         update_live_progress(
             numVariables=num_vars,
@@ -1791,8 +1808,8 @@ def solve(request: SolveRequest):
         patience0 = 1.5 if o["stop_at_first"] else (min(10.0, max(4.0, phase0_time * 0.2)) if obj_parts0 else None)
         solver, st, _ = run_solver(model, phase0_time, workers, patience=patience0, busy_by_teacher=busy_by_teacher, phase_label="Temel Yerleşim")
         model.ClearObjective()
-        print(f"[solver] temel (bitişiklik={'sert' if not allow_soft_consec else 'esnek'}, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}, tavizsiz_pencere={'sert' if not allow_soft_gaps else 'esnek'}): "
-              f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
+        safe_print(f"[solver] temel (bitişiklik={'sert' if not allow_soft_consec else 'esnek'}, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}, tavizsiz_pencere={'sert' if not allow_soft_gaps else 'esnek'}): "
+                   f"{solver.StatusName(st)} {solver.WallTime():.1f}s")
 
         if not ok(st) and (use_consec and not allow_soft_consec) and st in (cp_model.INFEASIBLE, cp_model.UNKNOWN):
             # 💡 DERS 1: Bitişikliği tüm okul için kapatmak yerine lokal esnek (soft) moda geçir!
@@ -1833,8 +1850,8 @@ def solve(request: SolveRequest):
                 phase_label="Lokal Esnek Yerleşim"
             )
             model.ClearObjective()
-            print(f"[solver] temel deneme 1 (bitişiklik=lokal_esnek, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}): "
-                  f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
+            safe_print(f"[solver] temel deneme 1 (bitişiklik=lokal_esnek, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}): "
+                       f"{solver.StatusName(st)} {solver.WallTime():.1f}s")
 
         if not ok(st) and not allow_soft_float and st in (cp_model.INFEASIBLE, cp_model.UNKNOWN):
             allow_soft_float = True
@@ -1872,8 +1889,8 @@ def solve(request: SolveRequest):
                 phase_label="Esnek Yerleşim"
             )
             model.ClearObjective()
-            print(f"[solver] temel deneme 2 (bitişiklik=lokal_esnek, sert_kayan=kapalı): "
-                  f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
+            safe_print(f"[solver] temel deneme 2 (bitişiklik=lokal_esnek, sert_kayan=kapalı): "
+                       f"{solver.StatusName(st)} {solver.WallTime():.1f}s")
 
         if not ok(st) and not allow_soft_gaps and (o.get("max_total_gaps_level") == "high" or o.get("min_total_gaps_level") == "high" or o.get("hourly_reserve_level") == "high") and st in (cp_model.INFEASIBLE, cp_model.UNKNOWN):
             allow_soft_gaps = True
@@ -1912,8 +1929,8 @@ def solve(request: SolveRequest):
                 phase_label="Pencere Esnek Yerleşim"
             )
             model.ClearObjective()
-            print(f"[solver] temel deneme 3 (bitişiklik=lokal_esnek, sert_kayan=kapalı, pencere=esnek): "
-                  f"{solver.StatusName(st)} {solver.WallTime():.1f}s", flush=True)
+            safe_print(f"[solver] temel deneme 3 (bitişiklik=lokal_esnek, sert_kayan=kapalı, pencere=esnek): "
+                       f"{solver.StatusName(st)} {solver.WallTime():.1f}s")
 
         if not ok(st):
             if _stop_event.is_set():
@@ -1984,8 +2001,8 @@ def solve(request: SolveRequest):
                 if tight_solver is not None and ok(tight_st):
                     best_solver = tight_solver
                     best_slack = int(round(tight_solver.ObjectiveValue()))
-                    print(f"[solver] asgari boşluk, blok ve yedek sıkılaştırma: {tight_solver.StatusName(tight_st)} "
-                          f"{tight_solver.WallTime():.1f}s, toplam açık={best_slack}", flush=True)
+                    safe_print(f"[solver] asgari boşluk, blok ve yedek sıkılaştırma: {tight_solver.StatusName(tight_st)} "
+                               f"{tight_solver.WallTime():.1f}s, toplam açık={best_slack}")
                     if o.get("min_total_gaps_level") == "high" or o.get("hourly_reserve_level") == "high" or o.get("enforce_consecutive"):
                         if best_slack == 0:
                             model.Add(tighten_expr == 0)
@@ -1998,12 +2015,12 @@ def solve(request: SolveRequest):
 
         # ⚡ İLK GEÇERLİ ÇÖZÜMDE DUR: İyileştirme kademeleri atlanır, saniyeler içinde dönülür
         if o["stop_at_first"]:
-            print(f"[solver] 'İlk geçerli çözümde dur' devrede. İyileştirme kademeleri atlandı. Geçen süre: {time.time() - start:.2f}s", flush=True)
+            safe_print(f"[solver] 'İlk geçerli çözümde dur' devrede. İyileştirme kademeleri atlandı. Geçen süre: {time.time() - start:.2f}s")
             stage = "ilk_gecerli"
             add_live_feed("⚡ Yıldırım Modu: İlk geçerli çözüm kabul edildi, tablo hazırlanıyor.", "success")
         elif _stop_event.is_set():
             stage = "kullanici_durdurdu"
-            print(f"[solver] Kullanıcı durdurma talebi devrede. Aşama 2 atlandı. Temel çözüm kabul edildi.", flush=True)
+            safe_print(f"[solver] Kullanıcı durdurma talebi devrede. Aşama 2 atlandı. Temel çözüm kabul edildi.")
             add_live_feed("⏹️ Kullanıcı durdurma komutu: Aşama 2 atlandı, temel geçerli çözüm alınıyor.", "warn")
         else:
             # 🚀 ADIM 1: Tek Geçişli Ağırlıklandırılmış Çok Amaçlı LNS Optimizasyonu
@@ -2050,8 +2067,8 @@ def solve(request: SolveRequest):
                         best_solver = opt_solver
                         stage = "kullanici_durdurdu" if _stop_event.is_set() else "iyileştirilmiş"
                         final_val = int(round(opt_solver.ObjectiveValue()))
-                        print(f"[solver] çok amaçlı LNS optimizasyonu tamamlandı: {opt_solver.StatusName(opt_st)} "
-                              f"{opt_solver.WallTime():.1f}s değer={final_val}", flush=True)
+                        safe_print(f"[solver] çok amaçlı LNS optimizasyonu tamamlandı: {opt_solver.StatusName(opt_st)} "
+                                   f"{opt_solver.WallTime():.1f}s değer={final_val}")
                         stage_details.append({
                             "tier": "Çok Amaçlı LNS (Boşluk & Kural)",
                             "value": final_val,
@@ -2059,8 +2076,8 @@ def solve(request: SolveRequest):
                             "seconds": round(opt_solver.WallTime(), 1)
                         })
                     else:
-                        print(f"[solver] optimizasyonda yeni çözüm bulunamadı veya durduruldu, temel çözüm korundu: "
-                              f"{opt_solver.StatusName(opt_st) if opt_solver else 'YOK'}", flush=True)
+                        safe_print(f"[solver] optimizasyonda yeni çözüm bulunamadı veya durduruldu, temel çözüm korundu: "
+                                   f"{opt_solver.StatusName(opt_st) if opt_solver else 'YOK'}")
                     model.ClearObjective()
 
         update_live_progress(
