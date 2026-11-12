@@ -3,13 +3,13 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Any
 
 class Settings(BaseModel):
-    schoolId: str = Field(default="pilot_okul_1")
-    schoolName: Optional[str] = "HZ. AYŞE KIZ ANADOLU İMAM HATİP LİSESİ"
-    directorName: Optional[str] = "CEMİL MURAT KURU"
-    directorTitle: Optional[str] = "Okul Müdür V."
-    principalName: Optional[str] = "Okul Müdürü"
-    city: Optional[str] = "HATAY"
-    district: Optional[str] = "ANTAKYA"
+    schoolId: str = Field(default="default_school")
+    schoolName: Optional[str] = None
+    directorName: Optional[str] = None
+    directorTitle: Optional[str] = None
+    principalName: Optional[str] = None
+    city: Optional[str] = None
+    district: Optional[str] = None
     days: List[str] 
     periodsPerDay: int 
     lunchBreakAfter: Optional[int] = None

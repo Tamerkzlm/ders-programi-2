@@ -180,7 +180,10 @@ function layeredDistribution(activeStudents, rooms, separatePairs = []) {
 
 // Koltuğa aday öğrenci yerleştirildiğinde oluşacak ceza puanını hesaplar
 // Düşük ceza = Daha iyi kelebek yerleşimi
-function calculatePlacementPenalty(grid, r, c, bankSeat, candidate, separateMap = null) {
+function calculatePlacementPenalty(
+  grid, r, c, bankSeat, candidate, separateMap = null,
+  seatedPositions?: Map<string, { row: number; col: number }>  // YENİ
+) {
   const currentSeatCol = c * 2 + bankSeat;
   const partnerSeatCol = c * 2 + (1 - bankSeat);
   let penalty = 0;
@@ -220,21 +223,18 @@ function calculatePlacementPenalty(grid, r, c, bankSeat, candidate, separateMap 
     }
   }
 
-  // 4. 🛡️ Salonda daha önce oturmuş ayrık eş kontrolü (Koltuk Mesafesini Maksimize Et)
-  if (separateMap && separateMap.size > 0) {
+  // 4. 🛡️ Ayrık eş konum kontrolü — O(1) Map lookup (önceden O(n) grid taramasıydı)
+  if (separateMap && separateMap.size > 0 && seatedPositions && seatedPositions.size > 0) {
     const candId = String(candidate.id || candidate.no);
     const partnerIds = separateMap.get(candId);
     if (partnerIds && partnerIds.size > 0) {
-      for (let prevR = 0; prevR < grid.length; prevR++) {
-        for (let prevC = 0; prevC < grid[prevR].length; prevC++) {
-          const seated = grid[prevR][prevC];
-          if (seated && partnerIds.has(String(seated.id || seated.no))) {
-            const rowDiff = Math.abs(r - prevR);
-            const colDiff = Math.abs(Math.floor(currentSeatCol / 2) - Math.floor(prevC / 2));
-            const manhattanDist = rowDiff + colDiff;
-            // Mesafe ne kadar küçükse ceza o kadar büyük
-            penalty += Math.max(0, 12 - manhattanDist) * 1500;
-          }
+      for (const partnerId of partnerIds) {
+        const pos = seatedPositions.get(partnerId);
+        if (pos) {
+          const rowDiff = Math.abs(r - pos.row);
+          const colDiff = Math.abs(Math.floor(currentSeatCol / 2) - Math.floor(pos.col / 2));
+          const manhattanDist = rowDiff + colDiff;
+          penalty += Math.max(0, 12 - manhattanDist) * 1500;
         }
       }
     }
@@ -249,6 +249,10 @@ function bucketSeating(students, room, separatePairs = []) {
   const { rows, cols } = room;
   const grid = Array.from({ length: rows }, () => Array(cols * 2).fill(null));
 
+  // YENİ: Anlık konum haritası — ayrık eş aramasını O(n) → O(1) indirir
+  // Key: studentId (string), Value: { row, col } (grid koordinatı)
+  const seatedPositions = new Map<string, { row: number; col: number }>();
+
   // Kalan öğrencileri havuzda tut
   let pool = fisherYatesShuffle([...students]);
 
@@ -261,7 +265,7 @@ function bucketSeating(students, room, separatePairs = []) {
       let minSolPenalty = Infinity;
 
       for (let i = 0; i < pool.length; i++) {
-        const pen = calculatePlacementPenalty(grid, r, c, 0, pool[i], separateMap);
+        const pen = calculatePlacementPenalty(grid, r, c, 0, pool[i], separateMap, seatedPositions);
         if (pen < minSolPenalty) {
           minSolPenalty = pen;
           bestSolIdx = i;
@@ -275,6 +279,8 @@ function bucketSeating(students, room, separatePairs = []) {
           ...student,
           koltuk: getSeatLabel(c, r, 0),
         };
+        // YENİ: Konum haritasını güncelle
+        seatedPositions.set(String(student.id || student.no), { row: r, col: c * 2 });
       }
 
       if (pool.length === 0) break;
@@ -284,7 +290,7 @@ function bucketSeating(students, room, separatePairs = []) {
       let minSagPenalty = Infinity;
 
       for (let i = 0; i < pool.length; i++) {
-        const pen = calculatePlacementPenalty(grid, r, c, 1, pool[i], separateMap);
+        const pen = calculatePlacementPenalty(grid, r, c, 1, pool[i], separateMap, seatedPositions);
         if (pen < minSagPenalty) {
           minSagPenalty = pen;
           bestSagIdx = i;
@@ -298,6 +304,8 @@ function bucketSeating(students, room, separatePairs = []) {
           ...student,
           koltuk: getSeatLabel(c, r, 1),
         };
+        // YENİ: Konum haritasını güncelle
+        seatedPositions.set(String(student.id || student.no), { row: r, col: c * 2 + 1 });
       }
     }
   }

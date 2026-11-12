@@ -17,6 +17,16 @@ def pre_flight_check(request: SolveRequest):
     # 1. Okul Genel Kapasite Kontrolü
     total_requested_hours = 0
     for classroom in classrooms:
+        # Yeni: sıfır veya negatif haftalık saat kontrolü
+        for course in classroom.courses:
+            if not isinstance(course.hoursPerWeek, int) or course.hoursPerWeek <= 0:
+                error_msg = (
+                    f"{classroom.name} sınıfındaki '{course.subject}' dersinin haftalık saati "
+                    f"({course.hoursPerWeek}) geçersiz. Haftalık ders saati en az 1 olmalıdır."
+                )
+                logger.error(f"Validasyon Hatası (Geçersiz Ders Saati): {error_msg}")
+                raise HTTPException(status_code=400, detail=error_msg)
+
         classroom_hours = sum(course.hoursPerWeek for course in classroom.courses)
         if classroom_hours > total_slots_per_classroom:
             error_msg = f"{classroom.name} sınıfının haftalık toplam ders saati ({classroom_hours} saat), okulun haftalık azami ders kapasitesini ({total_slots_per_classroom} saat) aşıyor! Lütfen bu sınıfın ders saatlerini azaltın."

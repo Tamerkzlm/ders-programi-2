@@ -9,9 +9,29 @@ from validators import pre_flight_check
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import secrets
+from fastapi.security import APIKeyHeader
+from fastapi import Depends
 import logging
 import os
 import asyncio
+
+# API Anahtarı Güvenliği
+_API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+_SOLVER_API_KEY = os.environ.get("SOLVER_API_KEY")  # render.yaml'da generateValue ile üretilir
+
+async def verify_api_key(api_key: str = Depends(_API_KEY_HEADER)):
+    """
+    Render bulut ortamında API anahtarı zorunludur.
+    Yerel geliştirme (IS_RENDER=False) ortamında atlanır.
+    """
+    IS_RENDER_CHECK = os.environ.get("RENDER") == "true" or os.environ.get("RENDER_SERVICE_ID") is not None
+    if IS_RENDER_CHECK and _SOLVER_API_KEY:
+        if not api_key or not secrets.compare_digest(api_key, _SOLVER_API_KEY):
+            raise HTTPException(
+                status_code=401,
+                detail="Geçersiz veya eksik API anahtarı (X-API-Key header'ı gerekli)."
+            )
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -29,8 +49,10 @@ async def lifespan(app: FastAPI):
     Uygulama başlarken çalışır, kapanırken temizlik yapar.
     """
     global executor
-    logger.info("Uygulama başlatılıyor. ThreadPoolExecutor (4 Workers) aktif ediliyor.")
-    executor = ThreadPoolExecutor(max_workers=4)
+    _is_render = os.environ.get("RENDER") == "true" or os.environ.get("RENDER_SERVICE_ID") is not None
+    _max_workers = 1 if _is_render else min(4, (os.cpu_count() or 2))
+    logger.info(f"Uygulama başlatılıyor. ThreadPoolExecutor ({_max_workers} Workers) aktif ediliyor.")
+    executor = ThreadPoolExecutor(max_workers=_max_workers)
     
     yield  # Uygulama burada çalışmaya devam eder
     
@@ -108,7 +130,7 @@ def stop_solving():
         "message": "Durdurma sinyali çözücü motoruna iletildi. Son geçerli çözüm mühürleniyor."
     }
 
-@app.post("/solve") # response_model kaldırıldı, hata vermesi engellendi
+@app.post("/solve", dependencies=[Depends(verify_api_key)])
 async def solve_timetable(request: SolveRequest):
     """
     OR-Tools CP-SAT algoritmasını çalıştıran uç nokta.
@@ -153,11 +175,22 @@ if not IS_RENDER and (FRONTEND_DIST / "index.html").is_file():
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
+    # Path traversal koruması: resolve() ile sembolik link ve .. geçişlerini engelle
+    _FRONTEND_DIST_RESOLVED = FRONTEND_DIST.resolve()
+
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        candidate = (FRONTEND_DIST / full_path).resolve()
-        if full_path and candidate.is_file() and str(candidate).startswith(str(FRONTEND_DIST)):
-            return FileResponse(str(candidate))
+        try:
+            candidate = (FRONTEND_DIST / full_path).resolve()
+            # is_relative_to (Python 3.9+) ile kesin kapsam kontrolü
+            if (
+                full_path
+                and candidate.is_file()
+                and candidate.is_relative_to(_FRONTEND_DIST_RESOLVED)
+            ):
+                return FileResponse(str(candidate))
+        except (ValueError, OSError):
+            pass
         return FileResponse(str(FRONTEND_DIST / "index.html"))
 else:
     @app.get("/")

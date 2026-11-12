@@ -5,6 +5,25 @@ import { useAppStore, calculateLiveMetrics, calculateLiveViolations, calculateLi
 import { store as kelebekStore } from '../utils/kelebek/store';
 import type { CloudSyncState, PublishedMobilePayload, SupabaseUser } from '../types';
 
+// 🔒 Multi-Tab Senkronizasyon Kilidi
+// Aynı tarayıcıda birden fazla sekme açıldığında eşzamanlı bulut yazma çakışmasını önler.
+let _syncBroadcastChannel: BroadcastChannel | null = null;
+
+const getSyncChannel = (): BroadcastChannel | null => {
+  if (typeof BroadcastChannel === 'undefined') return null;
+  if (!_syncBroadcastChannel) {
+    _syncBroadcastChannel = new BroadcastChannel('okul_planlama_cloud_sync');
+    _syncBroadcastChannel.onmessage = (e) => {
+      if (e.data === 'sync_started') {
+        isSyncInFlight = true;
+      } else if (e.data === 'sync_done' || e.data === 'sync_failed') {
+        isSyncInFlight = false;
+      }
+    };
+  }
+  return _syncBroadcastChannel;
+};
+
 const ACTIVE_TENANT_KEY = 'okul_planlama_active_tenant_v1';
 const PENDING_DIRTY_KEY = 'okul_planlama_pending_sync_v1';
 const DEBOUNCE_MS = 2000;
@@ -235,6 +254,8 @@ export const flushCloudSyncNow = async (force = false) => {
   }
 
   isSyncInFlight = true;
+  // Diğer sekmelere senkronizasyon başladığını bildir
+  getSyncChannel()?.postMessage('sync_started');
   useCloudSyncStore.getState().setCloudState({ syncStatus: 'syncing', errorMessage: null });
 
   try {
@@ -278,6 +299,7 @@ export const flushCloudSyncNow = async (force = false) => {
     return { ok: false, error: err };
   } finally {
     isSyncInFlight = false;
+    getSyncChannel()?.postMessage('sync_done');  // YENİ
     if (queuedSyncAfterFlight) {
       queuedSyncAfterFlight = false;
       scheduleDebouncedSync();

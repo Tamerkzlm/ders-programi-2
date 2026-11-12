@@ -11,8 +11,10 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: ALLOWED_ORIGINS
-        value: "*"
+        value: "https://ders-programi.netlify.app,https://ders-programi-2.netlify.app"
       - key: RENDER
         value: "true"
       - key: SOLVER_WORKERS
         value: "1"
+      - key: SOLVER_API_KEY
+        generateValue: true

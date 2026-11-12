@@ -27,8 +27,11 @@ import math
 import time
 import threading
 import traceback
+import logging
 from ortools.sat.python import cp_model
 from models import SolveRequest
+
+logger = logging.getLogger(__name__)
 
 FREE_DAY_W = 4  # B kademesi: fazladan gelinen her gün, yaklaşık 4 boşluk saatine denk ceza
 
@@ -158,7 +161,7 @@ def add_live_feed(text, msg_type="info"):
         elapsed = round(time.time() - _live_progress.get("startTime", time.time()), 1)
         _live_progress["elapsedSeconds"] = elapsed
         feed = list(_live_progress.get("feed", []))
-        feed.append({"time": f"{elapsed:.1f}s", "type": msg_type, "text": text, "msg": text})
+        feed.append({"time": f"{elapsed:.1f}s", "type": msg_type, "text": text})
         _live_progress["feed"] = feed[-25:]
 
 
@@ -509,7 +512,7 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
     # represent a 2‑hour block and must appear as a pair (period p and p+1) on the
     # same day and class.  The solver forces a 2‑hour activity (duration == 2) to
     # start at the first period of the pair.
-    pins_by_group: Dict[str, List[dict]] = {}
+    pins_by_group: dict[str, list[dict]] = {}
     for pin in (pinned_slots or []):
         gid = pin_field(pin, "groupId")
         if gid:
@@ -1197,7 +1200,11 @@ def extract(solver, x, activities, classrooms, teachers, days, P):
     busy = {t.id: {d: set() for d in days} for t in teachers}
     for (a_id, d, p), var in x.items():
         if solver.Value(var) == 1:
-            a = activities[a_id]
+            a = activities[a_id] if a_id < len(activities) and activities[a_id]["id"] == a_id \
+                else next((act for act in activities if act["id"] == a_id), None)
+            if a is None:
+                logger.warning(f"[extract] a_id={a_id} için aktivite bulunamadı, atlanıyor.")
+                continue
             for off in range(a["duration"]):
                 timetable[a["class_id"]][d].append(
                     {"period": p + off, "subject": a["subject"], "teacherId": a["teacher_id"]})
@@ -1443,7 +1450,8 @@ def audit(busy, teachers, profiles, days, o, timetable=None, classrooms=None, P=
             if b:
                 g = sum(1 for p in range(min(b), max(b) + 1) if p not in b)
                 t_gaps += g
-        gap_report[t.name] = t_gaps
+        # gap_report key olarak t.id kullan (isim çakışması güvenliği)
+        gap_report[t.id] = t_gaps
         total_gaps += t_gaps
 
         # 📌 Öğretmen Haftalık Toplam Pencere Denetimi
@@ -1695,6 +1703,8 @@ def solve(request: SolveRequest):
             return total_budget - (time.time() - start)
 
         activities = build_activities(classrooms)
+        # Hızlı ID → aktivite arama sözlüğü (extract() için kırılganlık önlemi)
+        _activities_by_id: dict[int, dict] = {a["id"]: a for a in activities}
         profiles, notes = teacher_profiles(teachers, activities, days, P, o)
         warnings_extra = []
 
@@ -2084,7 +2094,7 @@ def solve(request: SolveRequest):
             if not profiles[t.id]["exempt"]
             and not profiles[t.id]["is_part_time"]
             and profiles[t.id]["weekly"] > 0
-            and gap_report.get(t.name, 0) >= 3
+            and gap_report.get(t.id, 0) >= 3
         ]
         three_plus_count = len(three_plus_teachers)
 
@@ -2095,7 +2105,7 @@ def solve(request: SolveRequest):
             and not profiles[t.id].get("is_part_time", False)
             and profiles[t.id]["weekly"] > 0
         ]
-        all_gaps = sorted([gap_report.get(t.name, 0) for t in standard_active_teachers])
+        all_gaps = sorted([gap_report.get(t.id, 0) for t in standard_active_teachers])
         standard_count = len(standard_active_teachers)
 
         # Medyan Hesabı (İdareciler hariç veri grubu)
@@ -2112,16 +2122,16 @@ def solve(request: SolveRequest):
 
         # Okul medyanının üzerinde boşluğu olan öğretmenler (tıklanabilir yönlendirme için id ile birlikte)
         teachers_above_median = sorted(
-            [{"id": t.id, "name": t.name, "gaps": gap_report.get(t.name, 0)}
+            [{"id": t.id, "name": t.name, "gaps": gap_report.get(t.id, 0)}
              for t in standard_active_teachers
-             if gap_report.get(t.name, 0) > median_gaps],
+             if gap_report.get(t.id, 0) > median_gaps],
             key=lambda it: it["gaps"], reverse=True
         )
 
         above = sorted(
-            [{"id": t.id, "name": t.name, "gaps": gap_report.get(t.name, 0)}
+            [{"id": t.id, "name": t.name, "gaps": gap_report.get(t.id, 0)}
              for t in standard_active_teachers
-             if gap_report.get(t.name, 0) >= 3 or gap_report.get(t.name, 0) > avg],
+             if gap_report.get(t.id, 0) >= 3 or gap_report.get(t.id, 0) > avg],
             key=lambda it: it["gaps"], reverse=True
         )
 
@@ -2131,7 +2141,10 @@ def solve(request: SolveRequest):
         fairness_color = "emerald"
 
         if standard_count > 0:
-            variance = sum((g - avg) ** 2 for g in all_gaps) / standard_count
+            # Örneklem varyansı (Bessel düzeltmesi: N yerine N-1)
+            # Küçük okullarda (< 15 öğretmen) popülasyon varyansı skoru şişirir.
+            denom = standard_count - 1 if standard_count > 1 else 1
+            variance = sum((g - avg) ** 2 for g in all_gaps) / denom
             std_dev = math.sqrt(variance)
             max_gap = all_gaps[-1] if all_gaps else 0
 
@@ -2356,7 +2369,7 @@ def solve(request: SolveRequest):
         categorical_fairness_report = []
         for t in elig_reserve_teachers:
             prof = profiles[t.id]
-            t_g = gap_report.get(t.name, 0)
+            t_g = gap_report.get(t.id, 0)
             c_min = prof.get("cat_min_gaps", 0)
             c_max = prof.get("cat_max_gaps", 3)
             categorical_fairness_report.append({

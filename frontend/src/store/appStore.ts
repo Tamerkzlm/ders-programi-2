@@ -2100,7 +2100,27 @@ export const useAppStore = create<AppState>()(
 
       
     {
-      name: 'hz-ayse-timetable-v1',
+      name: 'okul-planlama-v4',
+      version: 4,
+      migrate: (persistedState: any, fromVersion: number) => {
+        // v1→v2: dykSettings alanı eklendi
+        if (fromVersion < 2) {
+          persistedState.dykSettings = persistedState.dykSettings || {};
+          persistedState.dykGroups = persistedState.dykGroups || [];
+        }
+        // v2→v3: examSettings alanları eklendi
+        if (fromVersion < 3) {
+          persistedState.examSettings = persistedState.examSettings || {};
+          persistedState.examSubjectsByGrade = persistedState.examSubjectsByGrade || {};
+        }
+        // v3→v4: pinnedSlots ve softPrefs/hardPrefs kesinleşti
+        if (fromVersion < 4) {
+          persistedState.pinnedSlots = persistedState.pinnedSlots || [];
+          persistedState.softPrefs = persistedState.softPrefs || {};
+          persistedState.hardPrefs = persistedState.hardPrefs || {};
+        }
+        return persistedState;
+      },
       onRehydrateStorage: () => (state) => {
         if (!state) return;
         const schoolName = (state.settings?.schoolName || '').toLowerCase();
