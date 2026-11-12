@@ -47,3 +47,4 @@ def test_capacity_overflow_raises():
     with pytest.raises(HTTPException) as exc:
         pre_flight_check(req)
     assert exc.value.status_code == 400
+
