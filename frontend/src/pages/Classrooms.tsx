@@ -19,7 +19,7 @@ import {
   Hash
 } from 'lucide-react';
 import DemoDataPromptModal from '../components/common/DemoDataPromptModal';
-import { generateCourseCode } from '../utils/courseCodeHelper';
+import { generateCourseCode, getClassroomTargetHours } from '../utils/courseCodeHelper';
 
 export default function Classrooms() {
   const { classrooms, teachers, addClassroom, updateClassroom, deleteClassroom, settings } = useAppStore();
@@ -44,6 +44,10 @@ export default function Classrooms() {
   const [keepTeachersOnCopy, setKeepTeachersOnCopy] = useState(true);
 
   const targetWeeklyHours = (settings?.days?.length || 5) * (settings?.periodsPerDay || 8); // Genelde 40
+  const hasMiddleSchool = useMemo(
+    () => classrooms.some(c => /^[5678](?![0-9])/.test((c.name || '').trim())),
+    [classrooms]
+  );
 
   const getExistingSubjects = (): string[] => {
     const subjects = new Set<string>();
@@ -81,9 +85,10 @@ export default function Classrooms() {
 
     classrooms.forEach(c => {
       const h = c.courses?.reduce((sum, co) => sum + (Number(co.hoursPerWeek) || 0), 0) || 0;
+      const classTarget = getClassroomTargetHours(c, settings);
       totalCurriculumHours += h;
-      if (h === targetWeeklyHours) completeCount++;
-      else if (h < targetWeeklyHours) missingCount++;
+      if (h === classTarget) completeCount++;
+      else if (h < classTarget) missingCount++;
       else overCount++;
     });
 
@@ -93,7 +98,7 @@ export default function Classrooms() {
       missingCount,
       overCount
     };
-  }, [classrooms, targetWeeklyHours]);
+  }, [classrooms, settings]);
 
   const openModal = (classroom = null) => {
     if (classroom) {
@@ -182,8 +187,10 @@ export default function Classrooms() {
 
       // 2. Seviye veya Durum Filtresi
       const totalHours = c.courses?.reduce((sum, co) => sum + (Number(co.hoursPerWeek) || 0), 0) || 0;
-      if (gradeFilter === 'missing') return totalHours < targetWeeklyHours;
-      if (gradeFilter === 'complete') return totalHours === targetWeeklyHours;
+      const classTarget = getClassroomTargetHours(c, settings);
+      if (gradeFilter === 'missing') return totalHours < classTarget;
+      if (gradeFilter === 'complete') return totalHours === classTarget;
+      if (gradeFilter === '5-8') return /^[5678](?![0-9])/.test(c.name.trim());
       if (gradeFilter === '9') return c.name.startsWith('9');
       if (gradeFilter === '10') return c.name.startsWith('10');
       if (gradeFilter === '11') return c.name.startsWith('11');
@@ -191,9 +198,12 @@ export default function Classrooms() {
 
       return true;
     });
-  }, [classrooms, searchTerm, gradeFilter, targetWeeklyHours]);
+  }, [classrooms, searchTerm, gradeFilter, settings]);
 
   const currentModalTotalHours = courses.reduce((sum, c) => sum + (parseInt(c.hoursPerWeek) || 0), 0);
+  const currentModalTargetHours = editingClassroom
+    ? getClassroomTargetHours({ ...editingClassroom, name: className || editingClassroom.name }, settings)
+    : getClassroomTargetHours({ name: className }, settings);
 
   return (
     <div className="p-6 space-y-6 transition-all duration-300">
@@ -241,7 +251,9 @@ export default function Classrooms() {
             <CheckCircle2 size={20} />
           </div>
           <div>
-            <div className="text-[10px] font-bold text-slate-400 uppercase">Tamamlanan ({targetWeeklyHours} sa)</div>
+            <div className="text-[10px] font-bold text-slate-400 uppercase">
+              Tamamlanan ({hasMiddleSchool ? '36/40 sa' : `${targetWeeklyHours} sa`})
+            </div>
             <div className="text-base font-black text-emerald-700">{stats.completeCount} Sınıf</div>
           </div>
         </div>
@@ -312,8 +324,20 @@ export default function Classrooms() {
               gradeFilter === 'complete' ? 'bg-emerald-600 text-white shadow-2xs' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
             }`}
           >
-            <CheckCircle2 size={12} /> 40 Saat Tamamlananlar ({stats.completeCount})
+            <CheckCircle2 size={12} /> Tamamlananlar ({stats.completeCount})
           </button>
+
+          {hasMiddleSchool && (
+            <button
+              type="button"
+              onClick={() => setGradeFilter('5-8')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                gradeFilter === '5-8' ? 'bg-slate-800 text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              5-8. Sınıflar
+            </button>
+          )}
 
           <button
             type="button"
@@ -372,9 +396,10 @@ export default function Classrooms() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredClassrooms.map(c => {
             const totalHours = c.courses?.reduce((sum, co) => sum + (Number(co.hoursPerWeek) || 0), 0) || 0;
-            const isComplete = totalHours === targetWeeklyHours;
-            const isMissing = totalHours < targetWeeklyHours;
-            const progressPercent = Math.min(100, Math.round((totalHours / targetWeeklyHours) * 100));
+            const classTarget = getClassroomTargetHours(c, settings);
+            const isComplete = totalHours === classTarget;
+            const isMissing = totalHours < classTarget;
+            const progressPercent = Math.min(100, Math.round((totalHours / classTarget) * 100));
 
             return (
               <div 
@@ -421,7 +446,7 @@ export default function Classrooms() {
                     <div className="flex justify-between items-center text-[10px] font-bold">
                       <span className="text-slate-400 uppercase">Haftalık Müfredat Yükü</span>
                       <span className={isComplete ? 'text-emerald-700' : isMissing ? 'text-amber-800' : 'text-rose-700'}>
-                        {totalHours} / {targetWeeklyHours} Saat ({progressPercent}%)
+                        {totalHours} / {classTarget} Saat ({progressPercent}%)
                       </span>
                     </div>
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -465,15 +490,15 @@ export default function Classrooms() {
                 <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-[11px] font-bold">
                   {isComplete ? (
                     <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md text-[10px]">
-                      <CheckCircle2 size={11} /> 40 Saat Tamam
+                      <CheckCircle2 size={11} /> {classTarget} Saat Tamam
                     </span>
                   ) : isMissing ? (
                     <span className="inline-flex items-center gap-1 text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md text-[10px]">
-                      <AlertTriangle size={11} /> {targetWeeklyHours - totalHours} Saat Eksik
+                      <AlertTriangle size={11} /> {classTarget - totalHours} Saat Eksik
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-rose-800 bg-rose-100 border border-rose-300 px-2 py-0.5 rounded-md text-[10px]">
-                      <AlertTriangle size={11} /> {totalHours - targetWeeklyHours} Saat Fazla
+                      <AlertTriangle size={11} /> {totalHours - classTarget} Saat Fazla
                     </span>
                   )}
 
@@ -503,7 +528,7 @@ export default function Classrooms() {
                   {editingClassroom ? `${className} Şubesi Müfredat Düzenleme` : 'Yeni Sınıf & Müfredat Tanımlama'}
                 </h2>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Mevcut Toplam: <strong className={currentModalTotalHours === targetWeeklyHours ? 'text-emerald-700' : 'text-amber-800'}>{currentModalTotalHours} / {targetWeeklyHours} Saat</strong>
+                  Mevcut Toplam: <strong className={currentModalTotalHours === currentModalTargetHours ? 'text-emerald-700' : 'text-amber-800'}>{currentModalTotalHours} / {currentModalTargetHours} Saat</strong>
                 </p>
               </div>
               <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">

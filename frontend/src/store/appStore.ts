@@ -100,6 +100,12 @@ import {
   ABDI_TIMETABLE
 } from './seedDataAbdi';
 
+import {
+  HASSA_SETTINGS,
+  HASSA_TEACHERS,
+  HASSA_CLASSROOMS
+} from './seedDataHassa';
+
 
 // 📊 CANLI METRİK VE PENCERE (BOŞLUK) HESAPLAMA MOTORU
 // Manuel sürükle-bırak, silme veya taşıma işlemlerinde anında çalışarak dağıtım raporunu günceller.
@@ -974,6 +980,7 @@ export interface AppState {
   downloadSchoolBackup: () => void;
   loadHzAyseDemoData: () => void;
   loadAbdiIpekciDemoData: (includeSchedule?: boolean) => void;
+  loadHassaDemoData: () => void;
   clearDataForManualEntry: () => void;
   setDemoDataChoice: (choice: DemoDataChoice) => void;
   resetDemoPrompt: () => void;
@@ -1493,10 +1500,14 @@ export const useAppStore = create<AppState>()(
       // 💾 OKUL VERİLERİ ANLIK YEDEĞİ (Otomatik Snapshot)
       saveCurrentSchoolSnapshot: () => {
         const state = get();
-        const currentName = state.settings?.schoolName || 'mevcut_okul';
-        const key = currentName.toLowerCase().includes('ayşe') || currentName.toLowerCase().includes('ayse') 
-          ? 'hz_ayse' 
-          : (currentName.toLowerCase().includes('abdi') ? 'abdi_ipekci' : 'diger');
+        const currentName = (state.settings?.schoolName || 'mevcut_okul').toLowerCase();
+        const key = currentName.includes('ayşe') || currentName.includes('ayse') || state.demoDataChoice === 'demo'
+          ? 'hz_ayse'
+          : currentName.includes('abdi') || state.demoDataChoice === 'abdi'
+          ? 'abdi_ipekci'
+          : currentName.includes('hassa') || state.demoDataChoice === 'hassa'
+          ? 'hassa'
+          : 'diger';
         const snapshot = {
           settings: state.settings,
           teachers: state.teachers,
@@ -1620,6 +1631,40 @@ export const useAppStore = create<AppState>()(
             pinnedSlots: [],
             generateResult: null,
             demoDataChoice: 'abdi'
+          });
+        }
+      },
+
+      // 🏫 HASSA KIZ ANADOLU İMAM HATİP LİSESİ VERİ SETİ (24 Öğretmen, 15 Şube, 580 Saat)
+      loadHassaDemoData: () => {
+        get().saveCurrentSchoolSnapshot();
+        let saved = null;
+        try {
+          const raw = localStorage.getItem('school_snapshot_hassa');
+          if (raw) saved = JSON.parse(raw);
+        } catch {
+          // localStorage okunamazsa varsayılan Hassa verisi yüklenir
+        }
+
+        if (saved && saved.teachers?.length > 0) {
+          set({
+            settings: saved.settings,
+            teachers: saved.teachers,
+            classrooms: enrichCoursesWithCodes(saved.classrooms),
+            timetable: saved.timetable || {},
+            pinnedSlots: saved.pinnedSlots || [],
+            generateResult: null,
+            demoDataChoice: 'hassa'
+          });
+        } else {
+          set({
+            settings: HASSA_SETTINGS,
+            teachers: HASSA_TEACHERS,
+            classrooms: enrichCoursesWithCodes(HASSA_CLASSROOMS),
+            timetable: {},
+            pinnedSlots: [],
+            generateResult: null,
+            demoDataChoice: 'hassa'
           });
         }
       },

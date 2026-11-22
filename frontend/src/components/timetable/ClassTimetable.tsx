@@ -162,6 +162,10 @@ export default function ClassTimetable({
   };
 
   const unassignedCourses = getUnassignedCourses();
+  const selectedClassTotalHours = (selectedClass?.courses || []).reduce(
+    (sum, co) => sum + (Number(co.hoursPerWeek) || 0),
+    0
+  );
   const activeFocus = draggedSource || selectedSlotForSwap;
 
   return (
@@ -203,7 +207,9 @@ export default function ClassTimetable({
           ) : (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
               <CheckCircle2 size={14} className="text-emerald-600" />
-              <span>Tüm Dersler Dağıtıldı (40/40 Saat)</span>
+              <span>
+                Tüm Dersler Dağıtıldı ({selectedClassTotalHours}/{selectedClassTotalHours} Saat)
+              </span>
             </div>
           )}
         </div>

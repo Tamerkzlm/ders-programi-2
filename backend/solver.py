@@ -500,11 +500,21 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
     # ---- Sınıf çakışması (tam dolu sınıfta her hücre TAM OLARAK bir ders: çok daha güçlü yayılım)
     for c in classrooms:
         c_acts = by_class.get(c.id, [])
-        full_class = sum(a["duration"] for a in c_acts) == num_days * P
+        class_total = sum(a["duration"] for a in c_acts)
+        full_class = class_total == num_days * P
+        min_c_day = class_total // num_days if num_days > 0 else 0
+        max_c_day = math.ceil(class_total / num_days) if num_days > 0 else P
         for d in days:
+            if not full_class and class_total > 0:
+                c_day_sum = sum(a["duration"] * v for a in c_acts for v in starts_on(a, d))
+                model.Add(c_day_sum >= min_c_day)
+                model.Add(c_day_sum <= max_c_day)
             for p in range(1, P + 1):
                 cov = cover(c_acts, d, p)
                 if full_class:
+                    model.AddExactlyOne(cov)
+                elif P >= 3 and class_total > 0 and min_c_day >= P - 1 and 2 <= p <= P - 1:
+                    # 36 saat / 40 slot gibi durumlarda öğrencilerin gün ortasında boş ders (pencere) kalmaması için ara saatler dolu tutulur
                     model.AddExactlyOne(cov)
                 elif len(cov) > 1:
                     model.AddAtMostOne(cov)
@@ -930,23 +940,30 @@ def build_model(use_consecutive, activities, classrooms, teachers, days, P, prof
                 continue
             weekly = sum(a["duration"] for a in pair_acts)
             has_single = any(a["duration"] == 1 for a in pair_acts)
-            max_day_pair = 2 if weekly <= 10 else 4
+            avail_days = max(1, profiles.get(t_id, {}).get("num_avail_days", num_days))
+            n2 = sum(1 for a in pair_acts if a["duration"] == 2)
+            n1 = sum(1 for a in pair_acts if a["duration"] == 1)
+            min_needed = math.ceil(weekly / avail_days)
+            blocks_days_needed = n2 + math.ceil(n1 / 2)
+            base_cap = 2 if weekly <= 10 else 4
+            if min_needed > base_cap or blocks_days_needed > avail_days:
+                needed_cap = max(min_needed, 4 if n2 > avail_days else 3)
+                max_day_pair = min(P, max(base_cap, needed_cap))
+            else:
+                max_day_pair = base_cap
             for d in days:
                 day_sum = sum(a["duration"] * v for a in pair_acts for v in starts_on(a, d))
                 if not allow_soft_consecutive:
-                    if weekly <= 10:
-                        model.Add(day_sum <= 2)
-                        if has_single:
-                            # İki tek saat aynı güne düşerse bitişik olmalı: en fazla bir "başlangıç"
-                            tc = {p: sum(cover(pair_acts, d, p)) for p in range(1, P + 1)}
-                            starts = []
-                            for p in range(1, P + 1):
-                                st = model.NewBoolVar(f"pst_{t_id}_{c_id}_{d}_{p}")
-                                model.Add(st >= tc[p] - (tc[p - 1] if p > 1 else 0))
-                                starts.append(st)
-                            model.Add(sum(starts) <= 1)
-                    else:
-                        model.Add(day_sum <= 4)
+                    model.Add(day_sum <= max_day_pair)
+                    if max_day_pair <= 2 and has_single:
+                        # İki tek saat aynı güne düşerse bitişik olmalı: en fazla bir "başlangıç"
+                        tc = {p: sum(cover(pair_acts, d, p)) for p in range(1, P + 1)}
+                        starts = []
+                        for p in range(1, P + 1):
+                            st = model.NewBoolVar(f"pst_{t_id}_{c_id}_{d}_{p}")
+                            model.Add(st >= tc[p] - (tc[p - 1] if p > 1 else 0))
+                            starts.append(st)
+                        model.Add(sum(starts) <= 1)
                 else:
                     # 💡 DERS 1 (FET Yaklaşımı): Aşım ihtimali olan çiftlerde kısıt
                     if weekly > max_day_pair:

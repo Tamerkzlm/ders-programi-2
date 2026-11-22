@@ -8,7 +8,8 @@ import {
   RefreshCw, 
   Users,
   Download,
-  GraduationCap
+  GraduationCap,
+  School
 } from 'lucide-react';
 
 export default function DemoDataPromptModal() {
@@ -16,6 +17,7 @@ export default function DemoDataPromptModal() {
     demoDataChoice, 
     loadHzAyseDemoData, 
     loadAbdiIpekciDemoData,
+    loadHassaDemoData,
     clearDataForManualEntry, 
     downloadSchoolBackup,
     teachers,
@@ -40,6 +42,11 @@ export default function DemoDataPromptModal() {
     showToast("Abdi İpekçi Ortaokulu gerçek verileri (35 öğretmen, 20 şube) başarıyla yüklendi.");
   };
 
+  const handleChooseHassa = () => {
+    loadHassaDemoData();
+    showToast("Hassa Kız AİHL gerçek verileri (24 öğretmen, 15 şube, 580 saat) başarıyla yüklendi.");
+  };
+
   const handleChooseManual = () => {
     clearDataForManualEntry();
     showToast("Sistem temizlendi, manuel giriş modundasınız.");
@@ -47,6 +54,7 @@ export default function DemoDataPromptModal() {
 
   const isHzAyse = demoDataChoice === 'demo' || (settings?.schoolName && settings.schoolName.toLowerCase().includes('ayşe'));
   const isAbdi = demoDataChoice === 'abdi' || (settings?.schoolName && settings.schoolName.toLowerCase().includes('abdi'));
+  const isHassa = demoDataChoice === 'hassa' || (settings?.schoolName && settings.schoolName.toLowerCase().includes('hassa'));
 
   // Eğer demoDataChoice null ise açılış modalı görünür
   const isPromptVisible = demoDataChoice === null || demoDataChoice === undefined;
@@ -64,7 +72,7 @@ export default function DemoDataPromptModal() {
       {/* 🌟 1. AÇILIŞ SORU PENCERESİ */}
       {isPromptVisible && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-2xl w-full p-6 sm:p-7 space-y-5 relative">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-4xl w-full p-6 sm:p-7 space-y-5 relative">
             
             <div className="flex items-center gap-3.5">
               <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-200">
@@ -80,7 +88,7 @@ export default function DemoDataPromptModal() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
               {/* SEÇENEK 1: HZ. AYŞE */}
               <button
                 type="button"
@@ -112,7 +120,7 @@ export default function DemoDataPromptModal() {
               >
                 <div className="space-y-1.5">
                   <span className="text-[10px] font-black text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
-                    Yeni Gerçek Test Verisi
+                    Ortaokul
                   </span>
                   <h3 className="text-xs font-bold text-slate-900 group-hover:text-emerald-700 transition-colors">
                     Abdi İpekçi Ortaokulu
@@ -127,7 +135,30 @@ export default function DemoDataPromptModal() {
                 </div>
               </button>
 
-              {/* SEÇENEK 3: MANUEL */}
+              {/* SEÇENEK 3: HASSA KIZ AİHL */}
+              <button
+                type="button"
+                onClick={handleChooseHassa}
+                className="group text-left p-4 rounded-2xl border-2 border-amber-500/80 bg-amber-50/50 hover:bg-amber-50 hover:border-amber-600 transition-all cursor-pointer shadow-2xs flex flex-col justify-between"
+              >
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-black text-amber-800 bg-white px-2 py-0.5 rounded border border-amber-200">
+                    Yeni Gerçek Test Verisi
+                  </span>
+                  <h3 className="text-xs font-bold text-slate-900 group-hover:text-amber-800 transition-colors">
+                    Hassa Kız AİHL
+                  </h3>
+                  <p className="text-[11px] text-slate-600">
+                    24 öğretmen, 15 şube (5-8. sınıflar 36 saat, 9-12. sınıflar 40 saat, günde 8 ders).
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-amber-200/60 flex items-center justify-between text-xs font-bold text-amber-800">
+                  <span>Yükle</span>
+                  <ArrowRight size={13} className="group-hover:translate-x-1 transition-transform" />
+                </div>
+              </button>
+
+              {/* SEÇENEK 4: MANUEL */}
               <button
                 type="button"
                 onClick={handleChooseManual}
@@ -159,17 +190,21 @@ export default function DemoDataPromptModal() {
       <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-3.5 shadow-2xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 mb-6 transition-all">
         <div className="flex items-center gap-3">
           <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-            isAbdi
+            isHassa
+              ? 'bg-amber-50 text-amber-700 border border-amber-200'
+              : isAbdi
               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
               : isHzAyse 
               ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' 
               : 'bg-slate-100 text-slate-700 border border-slate-200'
           }`}>
-            {isAbdi ? <GraduationCap size={18} /> : isHzAyse ? <Building2 size={18} /> : <Users size={18} />}
+            {isHassa ? <School size={18} /> : isAbdi ? <GraduationCap size={18} /> : isHzAyse ? <Building2 size={18} /> : <Users size={18} />}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${
-              isAbdi
+              isHassa
+                ? 'bg-amber-100 text-amber-900'
+                : isAbdi
                 ? 'bg-emerald-100 text-emerald-800'
                 : isHzAyse
                 ? 'bg-indigo-100 text-indigo-800'
@@ -208,6 +243,19 @@ export default function DemoDataPromptModal() {
             >
               <GraduationCap size={13} />
               <span>Abdi İpekçi'ye Geç</span>
+            </button>
+          )}
+
+          {/* HASSA KIZ AİHL GEÇİŞİ */}
+          {!isHassa && (
+            <button
+              type="button"
+              onClick={handleChooseHassa}
+              className="text-xs font-bold text-amber-800 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+              title="Hassa Kız AİHL verilerine geç (mevcut okul otomatik hafızaya kaydedilir)"
+            >
+              <School size={13} />
+              <span>Hassa Kız AİHL'ye Geç</span>
             </button>
           )}
 

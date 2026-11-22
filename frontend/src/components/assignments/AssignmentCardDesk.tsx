@@ -17,14 +17,18 @@ import {
   Copy, 
   Layers 
 } from 'lucide-react';
-import { generateCourseCode } from '../../utils/courseCodeHelper';
+import { generateCourseCode, getClassroomTargetHours } from '../../utils/courseCodeHelper';
 import { CURRICULUM_TEMPLATES, suggestCurriculumTemplate } from '../../utils/curriculumTemplates';
 
 export default function AssignmentCardDesk() {
   const { classrooms, teachers, updateClassroom, settings } = useAppStore();
 
-  // Hedef haftalık saat (Genellikle 5 gün x 8 saat = 40 saat)
+  // Hedef haftalık saat (Genellikle 5 gün x 8 saat = 40 saat, karma okulda ortaokul 36 saat)
   const targetWeeklyHours = (settings?.days?.length || 5) * (settings?.periodsPerDay || 8);
+  const hasMiddleSchool = useMemo(
+    () => classrooms.some(c => /^[5678](?![0-9])/.test((c.name || '').trim())),
+    [classrooms]
+  );
 
   // Seçili Durumlar (Sınıf, Ders, Öğretmen)
   const [selectedClassId, setSelectedClassId] = useState(classrooms[0]?.id || '');
@@ -77,6 +81,7 @@ export default function AssignmentCardDesk() {
   const classStatusMap = useMemo(() => {
     const map: Record<string, {
       totalHours: number;
+      targetHours: number;
       unassignedCount: number;
       isHoursFull: boolean;
       isAllTeachersAssigned: boolean;
@@ -86,22 +91,24 @@ export default function AssignmentCardDesk() {
     classrooms.forEach(c => {
       const courses = c.courses || [];
       const totalHours = courses.reduce((sum, co) => sum + (Number(co.hoursPerWeek) || 0), 0);
+      const classTarget = getClassroomTargetHours(c, settings);
       const unassignedCourses = courses.filter(co => !co.teacherId);
-      const isHoursFull = totalHours >= targetWeeklyHours;
+      const isHoursFull = totalHours >= classTarget;
       const isAllTeachersAssigned = courses.length > 0 && unassignedCourses.length === 0;
       const isComplete = isHoursFull && isAllTeachersAssigned;
 
       map[c.id] = {
         totalHours,
+        targetHours: classTarget,
         unassignedCount: unassignedCourses.length,
         isHoursFull,
         isAllTeachersAssigned,
         isComplete,
-        missingHours: Math.max(0, targetWeeklyHours - totalHours)
+        missingHours: Math.max(0, classTarget - totalHours)
       };
     });
     return map;
-  }, [classrooms, targetWeeklyHours]);
+  }, [classrooms, settings]);
 
   // Filtrelenmiş Sınıflar
   const filteredClassrooms = useMemo(() => {
@@ -111,6 +118,7 @@ export default function AssignmentCardDesk() {
 
       const status = classStatusMap[c.id];
       if (classGradeFilter === 'incomplete') return !status?.isComplete;
+      if (classGradeFilter === '5-8') return /^[5678](?![0-9])/.test(c.name.trim());
       if (classGradeFilter !== 'all') {
         const cleanName = c.name.trim();
         return cleanName.startsWith(classGradeFilter) || cleanName.includes(`${classGradeFilter}-`) || cleanName.includes(`${classGradeFilter}/`);
@@ -224,9 +232,10 @@ export default function AssignmentCardDesk() {
       setSelectedCourseId(remainingUnassigned[0].id);
     } else {
       setSelectedCourseId(null);
-      // Sınıf 40 saate ulaştıysa tebrik et!
+      // Sınıf hedef saate ulaştıysa tebrik et!
       const totalHours = updatedCourses.reduce((sum, co) => sum + (Number(co.hoursPerWeek) || 0), 0);
-      if (totalHours >= targetWeeklyHours) {
+      const classTarget = getClassroomTargetHours(currentClass, settings);
+      if (totalHours >= classTarget) {
         showToast(`🎉 Tebrikler! "${currentClass.name}" sınıfının tüm atamaları tamamlandı!`, 'complete');
       }
     }
@@ -478,7 +487,7 @@ export default function AssignmentCardDesk() {
                 <span>1. Sınıflar ({classrooms.length})</span>
               </span>
               <span className="text-[11px] font-bold text-slate-400">
-                Hedef: {targetWeeklyHours} Sa
+                Hedef: {hasMiddleSchool && targetWeeklyHours === 40 ? '36/40' : targetWeeklyHours} Sa
               </span>
             </div>
 
@@ -496,7 +505,7 @@ export default function AssignmentCardDesk() {
 
             {/* Kademe Filtre Çipleri */}
             <div className="flex items-center gap-1 overflow-x-auto scrollbar-none pb-1">
-              {['all', '9', '10', '11', '12', 'incomplete'].map(tab => (
+              {['all', ...(hasMiddleSchool ? ['5-8'] : []), '9', '10', '11', '12', 'incomplete'].map(tab => (
                 <button
                   key={tab}
                   type="button"
@@ -507,7 +516,7 @@ export default function AssignmentCardDesk() {
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  {tab === 'all' ? 'Tümü' : tab === 'incomplete' ? '⚠️ Eksikler' : `${tab}. Sınıf`}
+                  {tab === 'all' ? 'Tümü' : tab === 'incomplete' ? '⚠️ Eksikler' : tab === '5-8' ? '5-8. Sınıf' : `${tab}. Sınıf`}
                 </button>
               ))}
             </div>
@@ -523,7 +532,8 @@ export default function AssignmentCardDesk() {
               filteredClassrooms.map(c => {
                 const isSelected = selectedClassId === c.id;
                 const status: any = classStatusMap[c.id] || {};
-                const percent = Math.min(100, Math.round((status.totalHours / targetWeeklyHours) * 100));
+                const classTarget = status.targetHours || targetWeeklyHours;
+                const percent = Math.min(100, Math.round((status.totalHours / classTarget) * 100));
 
                 return (
                   <button
@@ -560,11 +570,11 @@ export default function AssignmentCardDesk() {
                       <span className={`text-[11px] font-black ${
                         status.isComplete 
                           ? 'text-emerald-700' 
-                          : status.totalHours > targetWeeklyHours
+                          : status.totalHours > classTarget
                           ? 'text-rose-700'
                           : 'text-slate-600'
                       }`}>
-                        {status.totalHours} / {targetWeeklyHours} Sa
+                        {status.totalHours} / {classTarget} Sa
                       </span>
                     </div>
 
@@ -574,7 +584,7 @@ export default function AssignmentCardDesk() {
                         className={`h-full transition-all duration-300 ${
                           status.isComplete
                             ? 'bg-emerald-500'
-                            : status.totalHours > targetWeeklyHours
+                            : status.totalHours > classTarget
                             ? 'bg-rose-500'
                             : 'bg-indigo-500'
                         }`}
@@ -607,7 +617,7 @@ export default function AssignmentCardDesk() {
                         ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                         : 'bg-indigo-50 text-indigo-800 border border-indigo-200'
                     }`}>
-                      {classStatusMap[currentClass.id]?.totalHours || 0} / {targetWeeklyHours} Saat
+                      {classStatusMap[currentClass.id]?.totalHours || 0} / {classStatusMap[currentClass.id]?.targetHours || targetWeeklyHours} Saat
                     </span>
                   </div>
 

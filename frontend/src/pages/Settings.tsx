@@ -11,7 +11,8 @@ import {
   RefreshCw, 
   Trash2,
   GraduationCap,
-  Download
+  Download,
+  School
 } from 'lucide-react';
 import DemoDataPromptModal from '../components/common/DemoDataPromptModal';
 
@@ -21,6 +22,7 @@ export default function Settings() {
     updateSettings, 
     loadHzAyseDemoData, 
     loadAbdiIpekciDemoData,
+    loadHassaDemoData,
     clearDataForManualEntry, 
     downloadSchoolBackup,
     teachers,
@@ -46,7 +48,21 @@ export default function Settings() {
     if (settings?.principalName) setPrincipalName(settings.principalName);
     if (settings?.days) setSelectedDays(settings.days);
     if (settings?.periodsPerDay) setPeriodsPerDay(settings.periodsPerDay);
-  }, [settings?.schoolName, settings?.principalName, settings?.days, settings?.periodsPerDay]);
+    if (settings?.startTime) setStartTime(settings.startTime);
+    if (settings?.lunchBreakAfter ?? settings?.lunchAfter) {
+      setLunchBreakAfter(settings.lunchBreakAfter ?? settings.lunchAfter ?? 5);
+    }
+    if (settings?.lunchBreakDuration) setLunchBreakDuration(settings.lunchBreakDuration);
+  }, [
+    settings?.schoolName,
+    settings?.principalName,
+    settings?.days,
+    settings?.periodsPerDay,
+    settings?.startTime,
+    settings?.lunchBreakAfter,
+    settings?.lunchAfter,
+    settings?.lunchBreakDuration
+  ]);
 
   const handleDayToggle = (day) => {
     if (selectedDays.includes(day)) {
@@ -74,6 +90,18 @@ export default function Settings() {
     setPrincipalName("Taner Eryılmaz");
     setPeriodsPerDay(7);
     setSuccessMessage('Abdi İpekçi Ortaokulu gerçek verileri (35 öğretmen, 20 şube, günde 7 saat) yüklendi.');
+    setTimeout(() => setSuccessMessage(''), 3500);
+  };
+
+  const handleLoadHassa = () => {
+    loadHassaDemoData();
+    setSchoolName("Hassa Kız Anadolu İmam Hatip Lisesi");
+    setPrincipalName("Ahmet Yaprak");
+    setPeriodsPerDay(8);
+    setStartTime("08:30");
+    setLunchBreakAfter(5);
+    setLunchBreakDuration(50);
+    setSuccessMessage('Hassa Kız AİHL gerçek verileri (24 öğretmen, 15 şube, 580 saat) yüklendi.');
     setTimeout(() => setSuccessMessage(''), 3500);
   };
 
@@ -160,6 +188,16 @@ export default function Settings() {
           >
             <GraduationCap size={14} />
             <span>Abdi İpekçi'yi Yükle</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleLoadHassa}
+            className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition-all cursor-pointer shadow-xs"
+            title="Hassa Kız AİHL verilerini yükle (mevcut okul kaydedilir)"
+          >
+            <School size={14} />
+            <span>Hassa Kız AİHL'yi Yükle</span>
           </button>
 
           <button

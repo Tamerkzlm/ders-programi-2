@@ -1,7 +1,7 @@
 // frontend/src/types/models.ts
 // 🏫 BACKEND (backend/models.py) & FRONTEND ORTAK VERİ MODELLERİ SÖZLEŞMESİ
 
-export type DemoDataChoice = 'demo' | 'abdi' | 'manual' | null;
+export type DemoDataChoice = 'demo' | 'abdi' | 'hassa' | 'manual' | null;
 
 export interface Settings {
   schoolId?: string;
@@ -32,6 +32,7 @@ export interface Classroom {
   id: string;
   name: string;
   grade?: number | string;
+  targetWeeklyHours?: number;
   courses: Course[];
   [key: string]: any;
 }
@@ -163,6 +164,7 @@ export interface RelaxedRule {
   day: string;
   ruleType: string;
   description: string;
+  isCritical?: boolean;
 }
 
 export interface LiveMetrics {

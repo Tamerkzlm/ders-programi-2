@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { getCourseColorClass } from '../utils/courseColors';
 import DemoDataPromptModal from '../components/common/DemoDataPromptModal';
-import { generateCourseCode } from '../utils/courseCodeHelper';
+import { generateCourseCode, getClassroomTargetHours } from '../utils/courseCodeHelper';
 import AssignmentCardDesk from '../components/assignments/AssignmentCardDesk';
 
 // Sınıf adı ve ders adına göre tutarlı gradyan renkler
@@ -193,18 +193,19 @@ export default function Assignments() {
     }
   }, [newAssignment.classroomId, newAssignment.subject, classrooms]);
 
-  const targetWeeklyHours = 40; 
   const missingClassLoads = useMemo(() => {
     return classrooms.map(c => {
       const totalHours = c.courses?.reduce((sum, co) => sum + (Number(co.hoursPerWeek) || 0), 0) || 0;
+      const classTarget = getClassroomTargetHours(c, settings);
       return {
         id: c.id,
         name: c.name,
         totalHours,
-        missing: targetWeeklyHours - totalHours
+        targetHours: classTarget,
+        missing: classTarget - totalHours
       };
     }).filter(c => c.missing > 0).sort((a, b) => b.missing - a.missing);
-  }, [classrooms]);
+  }, [classrooms, settings]);
 
   const handleQuickAction = (classId, missingHours) => {
     setNewAssignment({ 
@@ -372,7 +373,7 @@ export default function Assignments() {
             <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-4 rounded-2xl shadow-sm space-y-3">
               <div className="flex items-center gap-2 text-amber-800 font-bold text-xs">
                 <AlertTriangle size={16} />
-                <h2>Eksik Ders Yükü Olan Sınıflar (Hedef: 40 Saat)</h2>
+                <h2>Eksik Ders Yükü Olan Sınıflar</h2>
               </div>
               <div className="flex flex-wrap gap-2">
                 {missingClassLoads.map(mc => (
@@ -392,7 +393,7 @@ export default function Assignments() {
             </div>
           ) : (
             <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl shadow-sm flex items-center gap-2 text-emerald-800 text-xs font-bold">
-              <Info size={16} /> Tüm sınıfların 40 saatlik ders yükü atamaları eksiksiz tamamlanmıştır.
+              <Info size={16} /> Tüm sınıfların haftalık ders yükü atamaları eksiksiz tamamlanmıştır.
             </div>
           )}
 
