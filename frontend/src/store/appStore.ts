@@ -52,6 +52,13 @@ const DEFAULT_API_URL = isLocalHost
   : (import.meta.env.PROD ? CLOUD_SOLVER_URL : LOCAL_SOLVER_URL);
 let activeApiUrl = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
 
+const SOLVER_API_KEY = import.meta.env.VITE_SOLVER_API_KEY || '';
+const getSolverHeaders = (): Record<string, string> => (
+  SOLVER_API_KEY
+    ? { 'Content-Type': 'application/json', 'X-API-Key': SOLVER_API_KEY }
+    : { 'Content-Type': 'application/json' }
+);
+
 export const getActiveApiUrl = (): string => activeApiUrl;
 
 export const resolveSolverApiUrl = async (): Promise<string> => {
@@ -1276,7 +1283,7 @@ export const useAppStore = create<AppState>()(
           const targetApiUrl = await resolveSolverApiUrl();
           const response = await fetch(`${targetApiUrl}/solve`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getSolverHeaders(),
             body: JSON.stringify({
               settings,
               teachers,
@@ -1406,7 +1413,7 @@ export const useAppStore = create<AppState>()(
           const targetApiUrl = await resolveSolverApiUrl();
           const response = await fetch(`${targetApiUrl}/solve`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getSolverHeaders(),
             body: JSON.stringify({
               settings,
               teachers,

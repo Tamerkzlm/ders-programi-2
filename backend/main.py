@@ -14,24 +14,52 @@ from fastapi.security import APIKeyHeader
 from fastapi import Depends
 import logging
 import os
+import re
 import asyncio
+
+# CORS / İzin Verilen İstemci Kökenleri (Browser Origin)
+default_origins = (
+    "http://localhost:5173,"
+    "http://127.0.0.1:5173,"
+    "http://localhost:5174,"
+    "http://127.0.0.1:5174,"
+    "http://localhost:8000,"
+    "http://127.0.0.1:8000"
+)
+allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", default_origins)
+allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+ALLOWED_ORIGIN_REGEX = r"https?://.*\.(netlify\.app|vercel\.app|onrender\.com)|http://(localhost|127\.0\.0\.1)(:\d+)?"
+_ALLOWED_ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX)
+
+def _is_allowed_browser_origin(origin: str) -> bool:
+    if not origin:
+        return False
+    clean = origin.strip().rstrip("/")
+    if clean in allowed_origins or "*" in allowed_origins:
+        return True
+    return bool(_ALLOWED_ORIGIN_RE.fullmatch(clean))
 
 # API Anahtarı Güvenliği
 _API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 _SOLVER_API_KEY = os.environ.get("SOLVER_API_KEY")  # render.yaml'da generateValue ile üretilir
 
-async def verify_api_key(api_key: str = Depends(_API_KEY_HEADER)):
+async def verify_api_key(request: Request, api_key: str = Depends(_API_KEY_HEADER)):
     """
-    Render bulut ortamında API anahtarı zorunludur.
-    Yerel geliştirme (IS_RENDER=False) ortamında atlanır.
+    Render bulut ortamında doğrudan API çağrıları için X-API-Key zorunludur;
+    izin verilen tarayıcı kökenlerinden (Netlify/Vercel/Render/localhost) gelen
+    CORS istekleri ise doğrudan kabul edilir. Yerel ortamda atlanır.
     """
     IS_RENDER_CHECK = os.environ.get("RENDER") == "true" or os.environ.get("RENDER_SERVICE_ID") is not None
     if IS_RENDER_CHECK and _SOLVER_API_KEY:
-        if not api_key or not secrets.compare_digest(api_key, _SOLVER_API_KEY):
-            raise HTTPException(
-                status_code=401,
-                detail="Geçersiz veya eksik API anahtarı (X-API-Key header'ı gerekli)."
-            )
+        if api_key and secrets.compare_digest(api_key, _SOLVER_API_KEY):
+            return
+        origin = request.headers.get("origin", "")
+        if _is_allowed_browser_origin(origin):
+            return
+        raise HTTPException(
+            status_code=401,
+            detail="Geçersiz veya eksik API anahtarı (X-API-Key header'ı gerekli)."
+        )
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -63,22 +91,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Ders Programı API", lifespan=lifespan)
 
 # CORS Ayarları - Yerel geliştirme + Yerel Tam Güç + Netlify / Vercel bulut dağıtımı desteği
-default_origins = (
-    "http://localhost:5173,"
-    "http://127.0.0.1:5173,"
-    "http://localhost:5174,"
-    "http://127.0.0.1:5174,"
-    "http://localhost:8000,"
-    "http://127.0.0.1:8000"
-)
-allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", default_origins)
-allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
 logger.info(f"CORS allowed origins: {allowed_origins}")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=r"https?://.*\.(netlify\.app|vercel\.app|onrender\.com)|http://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origin_regex=ALLOWED_ORIGIN_REGEX,
     allow_credentials=False if "*" in allowed_origins else True,
     allow_methods=["*"],
     allow_headers=["*"],
