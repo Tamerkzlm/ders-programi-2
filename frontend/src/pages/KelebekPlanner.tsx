@@ -54,15 +54,17 @@ export default function KelebekPlanner() {
   // If rooms is empty but appStore classrooms exist, pre-fill them
   useEffect(() => {
     if (rooms.length === 0 && classrooms && classrooms.length > 0) {
-      const initialRooms = classrooms.map((c, i) => ({
-        id: `room-app-${c.id || i}-${Date.now()}`,
-        name: c.name,
-        rows: 5,
-        cols: 3,
-      }));
-      setRooms(initialRooms);
+      queueMicrotask(() => {
+        const initialRooms = classrooms.map((c, i) => ({
+          id: `room-app-${c.id || i}-${Date.now()}`,
+          name: c.name,
+          rows: 5,
+          cols: 3,
+        }));
+        setRooms(initialRooms);
+      });
     }
-  }, [classrooms]);
+  }, [classrooms, rooms.length]);
 
   // localStorage'dan yüklenince maxStep'i ayarla
   useEffect(() => {
@@ -71,7 +73,7 @@ export default function KelebekPlanner() {
     if (rooms.length > 0) max = Math.max(max, 3);
     if (rooms.length > 0 && students.length > 0) max = Math.max(max, 4);
     if (plan) max = Math.max(max, 5);
-    setMaxStep(max);
+    queueMicrotask(() => setMaxStep(max));
   }, [students.length, rooms.length, plan]);
 
   const showToast = (msg) => {

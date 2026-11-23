@@ -1,7 +1,7 @@
 """backend/tests/test_validators.py — Temel validator birim testleri"""
 import pytest
 from fastapi import HTTPException
-from models import SolveRequest, Settings, Teacher, Classroom, Course
+from models import SolveRequest, Settings, Teacher, Classroom, Course, PinnedSlot
 from validators import pre_flight_check
 
 def make_base_request(**overrides):
@@ -47,4 +47,10 @@ def test_capacity_overflow_raises():
     with pytest.raises(HTTPException) as exc:
         pre_flight_check(req)
     assert exc.value.status_code == 400
+
+
+def test_pinned_slot_without_teacher_id_passes():
+    pin = PinnedSlot(classId="c1", day="Pazartesi", period=1, subject="Matematik", teacherId=None)
+    req = make_base_request(pinnedSlots=[pin])
+    assert pre_flight_check(req) is True
 

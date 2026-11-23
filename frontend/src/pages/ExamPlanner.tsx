@@ -166,7 +166,7 @@ export default function ExamPlanner() {
       return validInRange;
     }
     return allRangeDays.map(d => d.date);
-  }, [examSettings?.selectedDates, allRangeDays]);
+  }, [examSettings, allRangeDays]);
 
   // Aktif çalışma günleri (Sıralanmış ve formatlanmış)
   const workingDays = useMemo(() => {

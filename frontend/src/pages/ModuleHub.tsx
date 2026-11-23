@@ -151,7 +151,7 @@ export default function ModuleHub() {
       : ['9', '10', '11', '12'];
     const baseGrades = Array.from(new Set(rawGrades.map(g => String(g).split('-')[0])));
     return baseGrades.join(', ');
-  }, [examSettings?.grades]);
+  }, [examSettings]);
 
   const modules = [
     {

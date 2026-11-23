@@ -64,13 +64,13 @@ function layeredDistribution(activeStudents, rooms, separatePairs = []) {
   const grades = Object.keys(gradeGroups).sort();
 
   // Her salonun alacağı hedef öğrenci sayısı
-  let roomTargets = roomCapacities.map(cap => Math.floor(totalStudents * cap / totalCapacity));
-  let assigned = roomTargets.reduce((a, b) => a + b, 0);
+  const roomTargets = roomCapacities.map(cap => Math.floor(totalStudents * cap / totalCapacity));
+  const assigned = roomTargets.reduce((a, b) => a + b, 0);
   const sortedByCap = roomCapacities
     .map((cap, i) => ({ cap, i }))
     .sort((a, b) => b.cap - a.cap);
 
-  let extra = totalStudents - assigned;
+  const extra = totalStudents - assigned;
   for (let k = 0; k < extra; k++) {
     roomTargets[sortedByCap[k % sortedByCap.length].i]++;
   }
@@ -254,7 +254,7 @@ function bucketSeating(students, room, separatePairs = []) {
   const seatedPositions = new Map<string, { row: number; col: number }>();
 
   // Kalan öğrencileri havuzda tut
-  let pool = fisherYatesShuffle([...students]);
+  const pool = fisherYatesShuffle([...students]);
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {

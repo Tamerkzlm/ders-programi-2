@@ -35,11 +35,13 @@ export default function TeacherTimetable({
   const isLocalRepairing = useAppStore(state => state.isLocalRepairing);
 
   // Dışarıdan initialTeacherId değişirse senkronize et
-  useEffect(() => {
+  const [prevInitialTeacherId, setPrevInitialTeacherId] = useState(initialTeacherId);
+  if (initialTeacherId !== prevInitialTeacherId) {
+    setPrevInitialTeacherId(initialTeacherId);
     if (initialTeacherId) {
       setSelectedTeacherId(initialTeacherId);
     }
-  }, [initialTeacherId]);
+  }
 
   // Sürükle-bırak canlı bilgi ekranı durumları
   const [draggedSource, setDraggedSource] = useState(null);

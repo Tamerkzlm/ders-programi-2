@@ -79,7 +79,7 @@ def evaluate(req, timetable):
             one_hour_days += len(b) == 1
             two_hour_days += len(b) == 2
             hours.append(len(b))
-        if hours and not t.isExempt and max(hours) - min(hours) > (hc.maxDailyHourDiff if hc else 2):
+        if hours and not t.isExempt and max(hours) - min(hours) > (getattr(hc, "maxDailyHourDiff", 2) if hc else 2):
             balance_viol += 1
     return {
         "hard_errors": len(hard_errors) + closed_viol,

@@ -88,7 +88,7 @@ export default function Assignments() {
 
   // Tüm atamaların düz listesi
   const allAssignments = useMemo(() => {
-    let list = [];
+    const list = [];
     classrooms.forEach(c => {
       if (c.courses) {
         c.courses.forEach(course => {
@@ -180,7 +180,7 @@ export default function Assignments() {
 
   const isSubjectAlreadyAssigned = useMemo(() => {
     try {
-      if (!newAssignment?.classroomId || !newAssignment?.subject) return false;
+      if (!newAssignment.classroomId || !newAssignment.subject) return false;
       const targetClass = classrooms.find(c => c.id === newAssignment.classroomId);
       if (!targetClass || !targetClass.courses) return false;
       const searchSubject = String(newAssignment.subject).trim().toLowerCase();

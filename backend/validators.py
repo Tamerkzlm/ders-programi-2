@@ -116,11 +116,12 @@ def pre_flight_check(request: SolveRequest):
         teacher_slot_map = {}
 
         for pin in pinned_slots:
-            c_id = getattr(pin, "classId", None) or pin.get("classId")
-            day = getattr(pin, "day", None) or pin.get("day")
-            period = int(getattr(pin, "period", None) or pin.get("period"))
-            subject = getattr(pin, "subject", None) or pin.get("subject")
-            t_id = getattr(pin, "teacherId", None) or pin.get("teacherId")
+            c_id = pin.get("classId") if isinstance(pin, dict) else getattr(pin, "classId", None)
+            day = pin.get("day") if isinstance(pin, dict) else getattr(pin, "day", None)
+            raw_period = pin.get("period") if isinstance(pin, dict) else getattr(pin, "period", None)
+            period = int(raw_period or 0)
+            subject = pin.get("subject") if isinstance(pin, dict) else getattr(pin, "subject", None)
+            t_id = pin.get("teacherId") if isinstance(pin, dict) else getattr(pin, "teacherId", None)
 
             c_key = (c_id, day, period)
             if c_key in class_slot_map:
@@ -133,7 +134,7 @@ def pre_flight_check(request: SolveRequest):
             if t_id:
                 t_key = (t_id, day, period)
                 if t_key in teacher_slot_map:
-                    t_name = teacher_dict.get(t_id, {}).name if t_id in teacher_dict else "Öğretmen"
+                    t_name = teacher_dict[t_id].name if t_id in teacher_dict else "Öğretmen"
                     error_msg = f"Kilit Çakışması: {t_name} öğretmenine {day} günü {period}. saatte iki farklı sınıfta kilit konulmuş!"
                     logger.error(f"Validasyon Hatası (Kilit Öğretmen Çakışması): {error_msg}")
                     raise HTTPException(status_code=400, detail=error_msg)

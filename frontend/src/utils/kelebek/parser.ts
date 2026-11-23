@@ -28,15 +28,15 @@ function parseSinifFromText(text) {
   const str = String(text).trim();
 
   // "9. Sınıf / A Şubesi" veya "9. Sınıf / A"
-  const m1 = str.match(/(\d+)\.\s*S[ıi]n[ıi]f\s*[\/\-]?\s*([A-Za-zÇĞİÖŞÜçğıöşü]+)\s*(?:[Şş]ubesi)?/i);
+  const m1 = str.match(/(\d+)\.\s*S[ıi]n[ıi]f\s*[/-]?\s*([A-Za-zÇĞİÖŞÜçğıöşü]+)\s*(?:[Şş]ubesi)?/i);
   if (m1) return { sinif: m1[1] + m1[2].toUpperCase(), grade: m1[1] };
 
   // "Hazırlık Sınıfı / A Şubesi"
-  const m2 = str.match(/Haz[ıi]rl[ıi]k\s*(?:S[ıi]n[ıi]f[ıi])?\s*[\/\-]?\s*([A-Za-zÇĞİÖŞÜçğıöşü]+)\s*(?:[Şş]ubesi)?/i);
+  const m2 = str.match(/Haz[ıi]rl[ıi]k\s*(?:S[ıi]n[ıi]f[ıi])?\s*[/-]?\s*([A-Za-zÇĞİÖŞÜçğıöşü]+)\s*(?:[Şş]ubesi)?/i);
   if (m2) return { sinif: 'HAZ' + m2[1].toUpperCase(), grade: 'haz' };
 
   // "9/A", "10-B", "12C"
-  const m3 = str.match(/^(\d{1,2})\s*[\/\-]?\s*([A-Za-zÇĞİÖŞÜçğıöşü]{1,2})$/i);
+  const m3 = str.match(/^(\d{1,2})\s*[/-]?\s*([A-Za-zÇĞİÖŞÜçğıöşü]{1,2})$/i);
   if (m3) return { sinif: m3[1] + m3[2].toUpperCase(), grade: m3[1] };
 
   return null;
@@ -279,7 +279,7 @@ export function exportPlanToExcel(plan, examInfo) {
       roomSheetRows.push([s.koltuk, s.no, s.adSoyad, (s.sinif || '').toUpperCase(), '']);
     });
 
-    const sheetTitle = room.name.substring(0, 31).replace(/[\/\\?*:[\]]/g, '_');
+    const sheetTitle = room.name.substring(0, 31).replace(/[/\\?*:[\]]/g, '_');
     const wsRoom = XLSX.utils.aoa_to_sheet(roomSheetRows);
     XLSX.utils.book_append_sheet(wb, wsRoom, sheetTitle);
   });

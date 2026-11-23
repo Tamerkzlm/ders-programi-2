@@ -1,6 +1,15 @@
 // Pure HTML string builders for print windows
 // No external dependencies — renders to clean print windows for reliable printing
 
+function escapeHtml(val: unknown): string {
+  return String(val ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function getSeatLabel(colIndex, rowIndex, seatInBank) {
   const seatIndex = colIndex * 2 + seatInBank;
   const letter = String.fromCharCode(65 + seatIndex);
@@ -86,11 +95,11 @@ const BASE_STYLES_PORTRAIT = `
 function headerHTML(examInfo, extra = '') {
   return `
     <div class="header">
-      <h1>${examInfo.okulAdi || 'Okul Adı'}</h1>
+      <h1>${escapeHtml(examInfo.okulAdi || 'Okul Adı')}</h1>
       <div class="meta">
-        <span><b>Ders:</b> ${examInfo.sinavDersi || ''}</span>
-        <span><b>Tarih:</b> ${examInfo.sinavTarihi || ''} / <b>Saat:</b> ${examInfo.sinavSaati || ''}</span>
-        <span><b>Sınav Türü:</b> ${examInfo.sinavTuru || 'Ortak Sınav'}</span>
+        <span><b>Ders:</b> ${escapeHtml(examInfo.sinavDersi || '')}</span>
+        <span><b>Tarih:</b> ${escapeHtml(examInfo.sinavTarihi || '')} / <b>Saat:</b> ${escapeHtml(examInfo.sinavSaati || '')}</span>
+        <span><b>Sınav Türü:</b> ${escapeHtml(examInfo.sinavTuru || 'Ortak Sınav')}</span>
         ${extra}
       </div>
     </div>
@@ -128,7 +137,7 @@ function gradeInfoBox(students) {
 function buildGridHTML(grid, room) {
   const colLetters = Array.from({ length: room.cols }, (_, i) => String.fromCharCode(65 + i));
 
-  let colHeaders = colLetters.map((_, ci) => {
+  const colHeaders = colLetters.map((_, ci) => {
     const l = String.fromCharCode(65 + ci * 2);
     const r = String.fromCharCode(65 + ci * 2 + 1);
     const bankHeader = `<th colspan="2" style="text-align:center;font-size:8px;font-weight:bold;background:#e2e8f0;border:1.5px solid #64748b;padding:2px 3px">${l} / ${r}</th>`;
@@ -138,17 +147,17 @@ function buildGridHTML(grid, room) {
     return bankHeader;
   }).join('');
 
-  let gridRows = grid.map((row, ri) => {
-    let cells = colLetters.map((_, ci) => {
+  const gridRows = grid.map((row, ri) => {
+    const cells = colLetters.map((_, ci) => {
       const l = row[ci * 2];
       const r = row[ci * 2 + 1];
       const lBg = l ? (GRADE_BG[l.grade] || '#f0f0f0') : '#f9fafb';
       const rBg = r ? (GRADE_BG[r.grade] || '#f0f0f0') : '#f9fafb';
       const lLabel = l
-        ? `<b style="font-size:7.5px">${getSeatLabel(ci, ri, 0)}</b><br/><span style="font-size:7px;font-weight:600">${l.adSoyad}</span><br/><span style="font-size:6.5px;color:#475569">${(l.sinif||'').toUpperCase()}</span>`
+        ? `<b style="font-size:7.5px">${getSeatLabel(ci, ri, 0)}</b><br/><span style="font-size:7px;font-weight:600">${escapeHtml(l.adSoyad)}</span><br/><span style="font-size:6.5px;color:#475569">${escapeHtml((l.sinif||'').toUpperCase())}</span>`
         : '';
       const rLabel = r
-        ? `<b style="font-size:7.5px">${getSeatLabel(ci, ri, 1)}</b><br/><span style="font-size:7px;font-weight:600">${r.adSoyad}</span><br/><span style="font-size:6.5px;color:#475569">${(r.sinif||'').toUpperCase()}</span>`
+        ? `<b style="font-size:7.5px">${getSeatLabel(ci, ri, 1)}</b><br/><span style="font-size:7px;font-weight:600">${escapeHtml(r.adSoyad)}</span><br/><span style="font-size:6.5px;color:#475569">${escapeHtml((r.sinif||'').toUpperCase())}</span>`
         : '';
       const bankCells = `
         <td style="background:${lBg};text-align:center;padding:2px 1px;line-height:1.25;border-top:1.5px solid #64748b;border-bottom:1.5px solid #64748b;border-left:1.5px solid #64748b;border-right:1px dashed #cbd5e1">${lLabel}</td>
@@ -201,11 +210,11 @@ export function buildRoomListHTML(plan, examInfo) {
     });
     students.sort((a, b) => a.adSoyad.localeCompare(b.adSoyad, 'tr'));
 
-    let studentRows = students.map((s, i) => `
+    const studentRows = students.map((s, i) => `
       <tr style="background:${i % 2 === 0 ? 'white' : '#f9fafb'}">
-        <td style="font-weight:bold;font-size:8px;text-align:center">${s.koltuk}</td>
-        <td style="font-size:8px;white-space:nowrap;">${s.adSoyad}</td>
-        <td style="font-size:8px;text-align:center;font-weight:600">${(s.sinif||'').toUpperCase()}</td>
+        <td style="font-weight:bold;font-size:8px;text-align:center">${escapeHtml(s.koltuk)}</td>
+        <td style="font-size:8px;white-space:nowrap;">${escapeHtml(s.adSoyad)}</td>
+        <td style="font-size:8px;text-align:center;font-weight:600">${escapeHtml((s.sinif||'').toUpperCase())}</td>
         <td style="height:21px;"></td>
       </tr>
     `).join('');
@@ -219,10 +228,10 @@ export function buildRoomListHTML(plan, examInfo) {
     const isLast = aIdx === sortedAssignments.length - 1;
     pages += `
       <div class="${isLast ? '' : 'page-break'}" style="padding:4px">
-        ${headerHTML(examInfo, `<span><b>Salon:</b> ${room.name}</span>`)}
+        ${headerHTML(examInfo, `<span><b>Salon:</b> ${escapeHtml(room.name)}</span>`)}
         <div class="two-col">
           <div class="left-col">
-            <h2 style="font-size:11px;font-weight:bold;margin-bottom:4px;border-bottom:1px solid #d1d5db;padding-bottom:2px">${room.name} — İmza Sirküsü</h2>
+            <h2 style="font-size:11px;font-weight:bold;margin-bottom:4px;border-bottom:1px solid #d1d5db;padding-bottom:2px">${escapeHtml(room.name)} — İmza Sirküsü</h2>
             <table class="sig-table" style="font-size:8px;">
               <thead>
                 <tr>
@@ -290,28 +299,28 @@ export function buildClassListHTML(plan, examInfo) {
 
   const classes = Object.keys(classMap).sort((a, b) => a.localeCompare(b, 'tr'));
 
-  let pages = classes.map((sinif, ci) => {
+  const pages = classes.map((sinif, ci) => {
     const students = classMap[sinif].sort((a, b) => a.adSoyad.localeCompare(b.adSoyad, 'tr'));
     const isLast = ci === classes.length - 1;
 
     const rows = students.map((s, i) => `
       <tr style="background:${i % 2 === 0 ? 'white' : '#f9fafb'}">
-        <td style="text-align:center;font-weight:600">${s.no}</td>
-        <td style="font-weight:500">${s.adSoyad}</td>
-        <td style="text-align:center;font-weight:bold;color:#1e40af">${s.salon}</td>
-        <td style="text-align:center;font-weight:bold">${s.koltuk}</td>
+        <td style="text-align:center;font-weight:600">${escapeHtml(s.no)}</td>
+        <td style="font-weight:500">${escapeHtml(s.adSoyad)}</td>
+        <td style="text-align:center;font-weight:bold;color:#1e40af">${escapeHtml(s.salon)}</td>
+        <td style="text-align:center;font-weight:bold">${escapeHtml(s.koltuk)}</td>
       </tr>
     `).join('');
 
     return `
       <div class="${isLast ? '' : 'page-break'}" style="padding:4px">
         ${headerHTML(examInfo)}
-        <h2 style="font-size:14px;font-weight:bold;margin-bottom:8px;color:#1e3a8a">${(sinif||'').toUpperCase()} Şubesi — Sınav Salon ve Koltuk Bilgileri</h2>
+        <h2 style="font-size:14px;font-weight:bold;margin-bottom:8px;color:#1e3a8a">${escapeHtml((sinif||'').toUpperCase())} Şubesi — Sınav Salon ve Koltuk Bilgileri</h2>
         <table>
           <thead><tr><th style="width:45px;text-align:center">No</th><th style="text-align:left">Ad Soyad</th><th style="text-align:center;width:90px">Salon</th><th style="text-align:center;width:60px">Koltuk</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
-        <p style="font-size:10px;color:#6b7280;margin-top:8px">Bu liste ${(sinif||'').toUpperCase()} öğrencilerine sınav öncesinde ilan edilecek veya dağıtılacaktır.</p>
+        <p style="font-size:10px;color:#6b7280;margin-top:8px">Bu liste ${escapeHtml((sinif||'').toUpperCase())} öğrencilerine sınav öncesinde ilan edilecek veya dağıtılacaktır.</p>
         ${creditFooter()}
       </div>
     `;
@@ -347,19 +356,19 @@ export function buildDoorListHTML(plan, examInfo) {
 
     const rows = students.map((s, i) => `
       <tr style="background:${i % 2 === 0 ? 'white' : '#f9fafb'}">
-        <td style="text-align:center;font-weight:bold;color:#1e40af;font-size:12px">${s.koltuk}</td>
-        <td style="text-align:center;font-weight:600">${s.no}</td>
-        <td style="font-weight:600;font-size:12px">${s.adSoyad}</td>
-        <td style="text-align:center;font-weight:bold">${(s.sinif||'').toUpperCase()}</td>
+        <td style="text-align:center;font-weight:bold;color:#1e40af;font-size:12px">${escapeHtml(s.koltuk)}</td>
+        <td style="text-align:center;font-weight:600">${escapeHtml(s.no)}</td>
+        <td style="font-weight:600;font-size:12px">${escapeHtml(s.adSoyad)}</td>
+        <td style="text-align:center;font-weight:bold">${escapeHtml((s.sinif||'').toUpperCase())}</td>
       </tr>
     `).join('');
 
     pages += `
       <div class="${isLast ? '' : 'page-break'}" style="padding:6px">
-        ${headerHTML(examInfo, `<span style="font-size:12px"><b>Salon:</b> ${room.name}</span>`)}
+        ${headerHTML(examInfo, `<span style="font-size:12px"><b>Salon:</b> ${escapeHtml(room.name)}</span>`)}
         
         <div style="background:#f1f5f9;border:2px solid #cbd5e1;border-radius:6px;padding:8px 12px;margin-bottom:12px;text-align:center">
-          <h2 style="font-size:18px;font-weight:900;color:#0f172a;letter-spacing:0.5px">${room.name} — SINAV SALONU KAPI LİSTESİ</h2>
+          <h2 style="font-size:18px;font-weight:900;color:#0f172a;letter-spacing:0.5px">${escapeHtml(room.name)} — SINAV SALONU KAPI LİSTESİ</h2>
           <p style="font-size:11px;color:#475569;margin-top:2px">Toplam Öğrenci: <b>${students.length}</b></p>
         </div>
 

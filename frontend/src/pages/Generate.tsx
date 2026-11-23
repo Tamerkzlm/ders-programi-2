@@ -42,15 +42,8 @@ export default function Generate() {
   } = useAppStore();
 
   const navigate = useNavigate(); 
-  const [selectedClassroom, setSelectedClassroom] = useState('');
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [resetSuccessMessage, setResetSuccessMessage] = useState('');
-
-  useEffect(() => {
-    if (classrooms.length > 0 && !selectedClassroom) {
-      setSelectedClassroom(classrooms[0].id);
-    }
-  }, [classrooms, selectedClassroom]);
 
   useEffect(() => {
     if (timetable && Object.keys(timetable).length > 0) {

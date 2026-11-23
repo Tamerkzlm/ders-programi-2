@@ -64,12 +64,6 @@ WEIGHT_RULES = 1000
 WEIGHT_GAPS = 25
 WEIGHT_PREFS = 1
 
-TIERS = [
-    ("rules", "kural ihlalleri", 0.5),
-    ("gaps", "boşluk ve boş gün", 0.65),
-    ("prefs", "tercihler", 1.0),
-]
-
 # 📡 Canlı İlerleme (Live Progress Feedback) Durumu
 _progress_lock = threading.Lock()
 _live_progress = {
@@ -1067,6 +1061,7 @@ class _Progress(cp_model.CpSolverSolutionCallback):
     def __init__(self, busy_by_teacher=None, phase_label="Optimizasyon"):
         super().__init__()
         self.best = None
+        self.first_found_at = None
         self.last_improve = time.time()
         self.last_telemetry = 0.0
         self.solutions = 0
@@ -1094,6 +1089,8 @@ class _Progress(cp_model.CpSolverSolutionCallback):
 
         now = time.time()
         self.solutions += 1
+        if self.first_found_at is None:
+            self.first_found_at = now
         try:
             obj = self.ObjectiveValue()
             if self.best is None or obj < self.best - 1e-9:
@@ -1145,7 +1142,7 @@ class _Progress(cp_model.CpSolverSolutionCallback):
     on_solution_callback = OnSolutionCallback
 
 
-def run_solver(model, time_limit, workers, patience=None, busy_by_teacher=None, phase_label="Optimizasyon"):
+def run_solver(model, time_limit, workers, patience=None, busy_by_teacher=None, phase_label="Optimizasyon", max_post_first=None):
     global _current_solver
     if _stop_event.is_set():
         return None, cp_model.UNKNOWN, None
@@ -1167,7 +1164,7 @@ def run_solver(model, time_limit, workers, patience=None, busy_by_teacher=None, 
         prm.cp_model_probing_level = 1
         prm.symmetry_level = 1
     else:
-        prm.linearization_level = 0 if is_render else 1
+        prm.linearization_level = 0
         prm.cp_model_probing_level = 1
     cb = _Progress(busy_by_teacher=busy_by_teacher, phase_label=phase_label)
     done = threading.Event()
@@ -1186,7 +1183,9 @@ def run_solver(model, time_limit, workers, patience=None, busy_by_teacher=None, 
                 except Exception:
                     pass
                 return
-            if patience and cb.best is not None and time.time() - cb.last_improve > patience:
+            if (patience and cb.best is not None and time.time() - cb.last_improve > patience) or (
+                max_post_first and cb.first_found_at is not None and time.time() - cb.first_found_at > max_post_first
+            ):
                 try:
                     if hasattr(solver, "stop_search"):
                         solver.stop_search()
@@ -1250,15 +1249,28 @@ def extract(solver, x, activities, classrooms, teachers, days, P):
     return timetable, busy
 
 
-def unify_blocks_post_solve(timetable, busy, classrooms, teachers, profiles, days, P, o):
+def unify_blocks_post_solve(timetable, busy, classrooms, teachers, profiles, days, P, o, pinned_slots=None):
     """
     Dağıtım sonrası deterministik yerel birleştirme geçidi:
     1. Aynı sınıfta ve aynı günde ayrık kalmış ders bloklarını (araya başka ders girmişse) güvenli yerel takaslarla birleştirir.
     2. Tek saatlik parçaları (örn. 1+1 saat ayrılmış bloklar) mümkünse birleştirir.
-    3. Hiçbir öğretmen çakışması, kapalı saat veya kural bozulmasına izin vermez.
+    3. Kilitli (pinned) hücrelere, öğretmen çakışmasına, kapalı saatlere veya öğretmen pencere artışına izin vermez.
     """
     if not o.get("enforce_consecutive", True):
         return timetable, busy
+
+    pinned_set = set()
+    for pin in (pinned_slots or []):
+        pc = pin_field(pin, "classId")
+        pd = pin_field(pin, "day")
+        pp = pin_field(pin, "period")
+        if pc and pd and pp is not None:
+            pinned_set.add((pc, pd, int(pp)))
+
+    def _day_gaps(p_set):
+        if len(p_set) <= 1:
+            return 0
+        return (max(p_set) - min(p_set) + 1) - len(p_set)
 
     improved = True
     iterations = 0
@@ -1280,12 +1292,16 @@ def unify_blocks_post_solve(timetable, busy, classrooms, teachers, profiles, day
                 # A) Aynı gün içindeki ayrık blokları birleştirme denemesi (Intra-day swap)
                 for i in range(len(periods)):
                     p1 = periods[i]
+                    if (c.id, d, p1) in pinned_set:
+                        continue
                     s1 = slot_by_p[p1]
                     t1_id = s1.get("teacherId")
                     subj1 = s1.get("subject")
 
                     for j in range(i + 1, len(periods)):
                         p2 = periods[j]
+                        if (c.id, d, p2) in pinned_set:
+                            continue
                         s2 = slot_by_p[p2]
                         t2_id = s2.get("teacherId")
                         subj2 = s2.get("subject")
@@ -1326,6 +1342,16 @@ def unify_blocks_post_solve(timetable, busy, classrooms, teachers, profiles, day
                             continue
                         if t2_id and p1 in profiles.get(t2_id, {}).get("closed", {}).get(d, set()):
                             continue
+
+                        # Öğretmen penceresini (boşluğunu) artıran takasları engelle
+                        if t1_id:
+                            t1_days = busy.get(t1_id, {}).get(d, set())
+                            if _day_gaps((t1_days - {p1}) | {p2}) > _day_gaps(t1_days):
+                                continue
+                        if t2_id:
+                            t2_days = busy.get(t2_id, {}).get(d, set())
+                            if _day_gaps((t2_days - {p2}) | {p1}) > _day_gaps(t2_days):
+                                continue
 
                         # GÜVENLİ TAKASI UYGULA
                         s1["period"] = p2
@@ -1737,8 +1763,6 @@ def solve(request: SolveRequest):
             return total_budget - (time.time() - start)
 
         activities = build_activities(classrooms)
-        # Hızlı ID → aktivite arama sözlüğü (extract() için kırılganlık önlemi)
-        _activities_by_id: dict[int, dict] = {a["id"]: a for a in activities}
         profiles, notes = teacher_profiles(teachers, activities, days, P, o)
         warnings_extra = []
 
@@ -1822,8 +1846,9 @@ def solve(request: SolveRequest):
             model.Minimize(sum(obj_parts0))
 
         phase0_time = remaining() if o["stop_at_first"] else max(45.0, remaining() * 0.70)
-        patience0 = 1.5 if o["stop_at_first"] else (min(10.0, max(4.0, phase0_time * 0.2)) if obj_parts0 else None)
-        solver, st, _ = run_solver(model, phase0_time, workers, patience=patience0, busy_by_teacher=busy_by_teacher, phase_label="Temel Yerleşim")
+        patience0 = 1.5 if o["stop_at_first"] else (min(4.0, max(2.0, phase0_time * 0.15)) if obj_parts0 else None)
+        max_post0 = None if o["stop_at_first"] else 8.0
+        solver, st, _ = run_solver(model, phase0_time, workers, patience=patience0, busy_by_teacher=busy_by_teacher, phase_label="Temel Yerleşim", max_post_first=max_post0)
         model.ClearObjective()
         safe_print(f"[solver] temel (bitişiklik={'sert' if not allow_soft_consec else 'esnek'}, sert_kayan={'açık' if not allow_soft_float else 'kapalı'}, tavizsiz_pencere={'sert' if not allow_soft_gaps else 'esnek'}): "
                    f"{solver.StatusName(st)} {solver.WallTime():.1f}s")
@@ -2104,7 +2129,9 @@ def solve(request: SolveRequest):
         )
         timetable, busy = extract(best_solver, x, activities, classrooms, teachers, days, P)
         # 🧩 Aşama 2.5: Deterministik Post-Solve Blok Birleştirme ve Yerel Temizlik Geçidi
-        timetable, busy = unify_blocks_post_solve(timetable, busy, classrooms, teachers, profiles, days, P, o)
+        timetable, busy = unify_blocks_post_solve(
+            timetable, busy, classrooms, teachers, profiles, days, P, o, pinned_slots=pinned_slots
+        )
         rule_msgs, gap_report, total_gaps, relaxed_rules = audit(
             busy, teachers, profiles, days, o,
             timetable=timetable, classrooms=classrooms, P=P

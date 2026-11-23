@@ -392,9 +392,11 @@ export default function AssignmentCardDesk() {
   };
 
   // Seçili sınıf değiştiğinde ders seçimini temizle
-  useEffect(() => {
+  const [prevSelectedClassId, setPrevSelectedClassId] = useState(selectedClassId);
+  if (selectedClassId !== prevSelectedClassId) {
+    setPrevSelectedClassId(selectedClassId);
     setSelectedCourseId(null);
-  }, [selectedClassId]);
+  }
 
   return (
     <div className="space-y-4">

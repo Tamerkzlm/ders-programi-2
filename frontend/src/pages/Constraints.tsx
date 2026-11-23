@@ -27,6 +27,45 @@ import {
 } from 'lucide-react';
 import CapacityHeatmap from '../components/common/CapacityHeatmap';
 
+// 4 Kademeli Sezgisel Rozet Bileşeni
+const PriorityBadges = ({ currentLevel, onChange, labels = {} as any }: any) => {
+  const levels = [
+    { id: 'off', label: labels.off || 'Kapalı' },
+    { id: 'low', label: labels.low || 'Düşük' },
+    { id: 'medium', label: labels.medium || 'Dengeli' },
+    { id: 'high', label: labels.high || 'Tavizsiz' }
+  ];
+
+  const getColors = (id: string, active: boolean) => {
+    if (!active) return 'bg-gray-100 text-gray-500 hover:bg-gray-200 border-transparent';
+    switch (id) {
+      case 'off': return 'bg-gray-800 text-white border-gray-900 shadow-xs';
+      case 'low': return 'bg-amber-100 text-amber-900 border-amber-300 shadow-xs font-bold';
+      case 'medium': return 'bg-blue-600 text-white border-blue-700 shadow-sm font-bold';
+      case 'high': return 'bg-purple-700 text-white border-purple-800 shadow-md font-extrabold';
+      default: return '';
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {levels.map((lvl) => {
+        const active = currentLevel === lvl.id;
+        return (
+          <button
+            key={lvl.id}
+            type="button"
+            onClick={() => onChange(lvl.id)}
+            className={`py-2 px-3 rounded-xl border text-xs text-center transition-all cursor-pointer ${getColors(lvl.id, active)}`}
+          >
+            <div className="font-bold">{lvl.label}</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
 export default function Constraints() {
   const navigate = useNavigate();
   const { hardPrefs, setHardPrefs, softPrefs, updateSoftPrefs, teachers, classrooms, settings } = useAppStore();
@@ -423,45 +462,6 @@ export default function Constraints() {
     updateSoftPrefs(defaultSoft);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
-  };
-
-  // 4 Kademeli Sezgisel Rozet Bileşeni
-  const PriorityBadges = ({ currentLevel, onChange, labels = {} as any }: any) => {
-    const levels = [
-      { id: 'off', label: labels.off || 'Kapalı' },
-      { id: 'low', label: labels.low || 'Düşük' },
-      { id: 'medium', label: labels.medium || 'Dengeli' },
-      { id: 'high', label: labels.high || 'Tavizsiz' }
-    ];
-
-    const getColors = (id, active) => {
-      if (!active) return 'bg-gray-100 text-gray-500 hover:bg-gray-200 border-transparent';
-      switch (id) {
-        case 'off': return 'bg-gray-800 text-white border-gray-900 shadow-xs';
-        case 'low': return 'bg-amber-100 text-amber-900 border-amber-300 shadow-xs font-bold';
-        case 'medium': return 'bg-blue-600 text-white border-blue-700 shadow-sm font-bold';
-        case 'high': return 'bg-purple-700 text-white border-purple-800 shadow-md font-extrabold';
-        default: return '';
-      }
-    };
-
-    return (
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {levels.map((lvl) => {
-          const active = currentLevel === lvl.id;
-          return (
-            <button
-              key={lvl.id}
-              type="button"
-              onClick={() => onChange(lvl.id)}
-              className={`py-2 px-3 rounded-xl border text-xs text-center transition-all cursor-pointer ${getColors(lvl.id, active)}`}
-            >
-              <div className="font-bold">{lvl.label}</div>
-            </button>
-          );
-        })}
-      </div>
-    );
   };
 
   return (

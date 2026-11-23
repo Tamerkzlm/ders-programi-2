@@ -53,7 +53,7 @@ const DEFAULT_API_URL = isLocalHost
 let activeApiUrl = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
 
 const SOLVER_API_KEY = import.meta.env.VITE_SOLVER_API_KEY || '';
-const getSolverHeaders = (): Record<string, string> => (
+export const getSolverHeaders = (): Record<string, string> => (
   SOLVER_API_KEY
     ? { 'Content-Type': 'application/json', 'X-API-Key': SOLVER_API_KEY }
     : { 'Content-Type': 'application/json' }
@@ -1255,7 +1255,7 @@ export const useAppStore = create<AppState>()(
           const targetApiUrl = getActiveApiUrl() || await resolveSolverApiUrl();
           await fetch(`${targetApiUrl}/solve/stop`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: getSolverHeaders()
           });
         } catch (err) {
           console.error('Stop request failed:', err);
@@ -1562,7 +1562,9 @@ export const useAppStore = create<AppState>()(
         try {
           const raw = localStorage.getItem('school_snapshot_hz_ayse');
           if (raw) saved = JSON.parse(raw);
-        } catch (e) {}
+        } catch {
+          // ignore corrupted localStorage snapshot
+        }
 
         const seedById = new Map(REAL_TEACHERS.map((t) => [t.id, t]));
         const syncedTeachers = saved?.teachers?.length > 0
@@ -1617,7 +1619,9 @@ export const useAppStore = create<AppState>()(
         try {
           const raw = localStorage.getItem('school_snapshot_abdi_ipekci');
           if (raw) saved = JSON.parse(raw);
-        } catch (e) {}
+        } catch {
+          // ignore corrupted localStorage snapshot
+        }
 
         if (saved && saved.teachers?.length > 0) {
           set({
@@ -2196,7 +2200,9 @@ export const useAppStore = create<AppState>()(
               });
               localStorage.setItem(SyncFlagKey, '1');
             }
-          } catch (e) {}
+          } catch {
+          // ignore corrupted localStorage snapshot
+        }
         }
       },
       // 🛡️ 5MB localStorage kota patlamasını (QuotaExceededError) önleyen filtre:

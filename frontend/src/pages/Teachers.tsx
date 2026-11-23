@@ -636,7 +636,7 @@ export default function Teachers() {
             let closedSlotsCount = 0;
             Object.keys(t.unavailable || {}).forEach(day => { closedSlotsCount += (t.unavailable[day] || []).length; });
 
-            let totalAssignedHours = getTeacherLoad(t.id);
+            const totalAssignedHours = getTeacherLoad(t.id);
             const isOverloaded = totalAssignedHours > 30;
 
             const assignedCourseEntries = [];

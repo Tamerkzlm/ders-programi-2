@@ -43,7 +43,9 @@ export default function Settings() {
   const allWeekDays = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"];
   const [selectedDays, setSelectedDays] = useState(settings?.days || ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]);
 
-  useEffect(() => {
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings !== prevSettings) {
+    setPrevSettings(settings);
     if (settings?.schoolName) setSchoolName(settings.schoolName);
     if (settings?.principalName) setPrincipalName(settings.principalName);
     if (settings?.days) setSelectedDays(settings.days);
@@ -53,16 +55,7 @@ export default function Settings() {
       setLunchBreakAfter(settings.lunchBreakAfter ?? settings.lunchAfter ?? 5);
     }
     if (settings?.lunchBreakDuration) setLunchBreakDuration(settings.lunchBreakDuration);
-  }, [
-    settings?.schoolName,
-    settings?.principalName,
-    settings?.days,
-    settings?.periodsPerDay,
-    settings?.startTime,
-    settings?.lunchBreakAfter,
-    settings?.lunchAfter,
-    settings?.lunchBreakDuration
-  ]);
+  }
 
   const handleDayToggle = (day) => {
     if (selectedDays.includes(day)) {

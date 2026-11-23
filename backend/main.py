@@ -130,12 +130,12 @@ def health_check():
         "message": "API is running",
     }
 
-@app.get("/solve/progress")
+@app.get("/solve/progress", dependencies=[Depends(verify_api_key)])
 def solve_progress():
     """Çözüm esnasında anlık ilerleme, bulunan çözüm sayısı ve pencere düşüşünü döndürür."""
     return get_live_progress()
 
-@app.api_route("/solve/stop", methods=["GET", "POST"])
+@app.api_route("/solve/stop", methods=["GET", "POST"], dependencies=[Depends(verify_api_key)])
 def stop_solving():
     """
     Kullanıcının devam eden optimizasyonu sonlandırıp son geçerli çözümü almasını sağlar.

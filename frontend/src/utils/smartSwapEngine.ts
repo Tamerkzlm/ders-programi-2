@@ -381,12 +381,11 @@ export const evaluateSwapOrMove = ({
       return { isValid: false, reason: 'Aynı öğretmenin iki dersi takas edilemez' };
     }
 
-    let tgtConflictClassId = null;
     let tgtIsClosed = false;
 
     // Hedef öğretmen kaynak saate gidebilir mi?
     if (!source.fromPool) {
-      tgtConflictClassId = getTeachingConflict(tgtTeacher.id, srcDay, srcPeriod, tgtClassId, tgtDay, tgtPeriod);
+      const tgtConflictClassId = getTeachingConflict(tgtTeacher.id, srcDay, srcPeriod, tgtClassId, tgtDay, tgtPeriod);
       if (tgtConflictClassId) {
         return {
           isValid: false,

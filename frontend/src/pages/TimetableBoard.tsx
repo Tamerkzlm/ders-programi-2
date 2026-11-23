@@ -46,12 +46,14 @@ export default function TimetableBoard() {
     unlockInfo: UnlockInfo;
   } | null>(null);
 
-  useEffect(() => {
+  const [prevIncomingTeacherId, setPrevIncomingTeacherId] = useState(incomingTeacherId);
+  if (incomingTeacherId !== prevIncomingTeacherId) {
+    setPrevIncomingTeacherId(incomingTeacherId);
     if (incomingTeacherId) {
       setActiveTeacherId(incomingTeacherId);
       setViewMode('teacher');
     }
-  }, [location.state, location.search]);
+  }
 
   // 🔄 UNDO / REDO (GERİ AL / İLERİ AL) DURUM YÖNETİMİ
   const [history, setHistory] = useState(() => timetable ? [JSON.parse(JSON.stringify(timetable))] : []);

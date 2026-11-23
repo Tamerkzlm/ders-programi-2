@@ -5,13 +5,14 @@ import { RefreshCcw, Calendar, AlertTriangle, Sunrise, Sunset, CheckCircle2, Loc
 export default function AvailabilityGrid({ settings, teacher, onChange, totalAssignedHours = 0 }: any) {
   const { days = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'], periodsPerDay = 8 } = settings || {};
   const [localUnavailable, setLocalUnavailable] = useState<Record<string, number[]>>(teacher.unavailable || {});
+  const [prevUnavailable, setPrevUnavailable] = useState(teacher.unavailable);
+  if (teacher.unavailable !== prevUnavailable) {
+    setPrevUnavailable(teacher.unavailable);
+    setLocalUnavailable(teacher.unavailable || {});
+  }
   
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode] = useState(null); 
-
-  useEffect(() => {
-    setLocalUnavailable(teacher.unavailable || {});
-  }, [teacher.unavailable]);
 
   const handleMouseDown = (day, period) => {
     setIsDragging(true);

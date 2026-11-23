@@ -15,7 +15,7 @@ import {
   Loader2
 } from 'lucide-react';
 
-import { getActiveApiUrl, useAppStore } from '../../store/appStore';
+import { getActiveApiUrl, getSolverHeaders, useAppStore } from '../../store/appStore';
 
 export default function TelemetryModal({ solverTimeout = 300, isGenerating = false, stopAtFirstSolution = false }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -29,8 +29,10 @@ export default function TelemetryModal({ solverTimeout = 300, isGenerating = fal
 
   useEffect(() => {
     if (!isGenerating) {
-      setElapsedSeconds(0);
-      setLiveData(null);
+      queueMicrotask(() => {
+        setElapsedSeconds(0);
+        setLiveData(null);
+      });
       return;
     }
     const timer = setInterval(() => {
@@ -46,7 +48,9 @@ export default function TelemetryModal({ solverTimeout = 300, isGenerating = fal
 
     const fetchProgress = async () => {
       try {
-        const res = await fetch(`${getActiveApiUrl()}/solve/progress`);
+        const res = await fetch(`${getActiveApiUrl()}/solve/progress`, {
+          headers: getSolverHeaders()
+        });
         if (res.ok) {
           const data = await res.json();
           if (isMounted && data) {
@@ -395,14 +399,14 @@ export default function TelemetryModal({ solverTimeout = 300, isGenerating = fal
             {feed.length > 0 ? (
               feed.map((item, idx) => (
                 <div key={idx} className="flex items-start gap-2 leading-relaxed">
-                  <span className="text-slate-500 shrink-0">[{item.time}s]</span>
+                  <span className="text-slate-500 shrink-0">[{item.time}]</span>
                   <span className={
                     ['solution', 'success', 'improve'].includes(item.type) ? 'text-emerald-300 font-bold' :
                     item.type === 'warn' ? 'text-amber-300 font-bold' :
                     item.type === 'error' ? 'text-rose-400 font-bold' :
                     'text-slate-300'
                   }>
-                    {item.msg}
+                    {item.text || item.msg}
                   </span>
                 </div>
               ))

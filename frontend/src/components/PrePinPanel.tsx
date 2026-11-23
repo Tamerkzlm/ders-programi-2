@@ -15,6 +15,8 @@ import {
   Link2 
 } from 'lucide-react';
 
+const createGroupId = () => `grp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
 export default function PrePinPanel() {
   const { 
     classrooms, 
@@ -38,27 +40,22 @@ export default function PrePinPanel() {
     return settings?.days && settings.days.length > 0
       ? settings.days 
       : ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"];
-  }, [settings?.days]);
+  }, [settings]);
 
   const periodsCount = Number(settings?.periodsPerDay) || 8;
   const lunchAfter = settings?.lunchAfter !== undefined ? Number(settings.lunchAfter) : 4;
 
-  // Varsayılan sınıf seçimi
-  useEffect(() => {
-    if (!selectedClassId && classrooms && classrooms.length > 0) {
-      setSelectedClassId(classrooms[0].id);
-    }
-  }, [classrooms, selectedClassId]);
-
-  // Sınıf değiştiğinde aktif tavsiyeyi temizle
-  useEffect(() => {
+  const effectiveClassId = selectedClassId || classrooms?.[0]?.id || '';
+  const [prevClassId, setPrevClassId] = useState(effectiveClassId);
+  if (effectiveClassId !== prevClassId) {
+    setPrevClassId(effectiveClassId);
     setActiveSuggestion(null);
     setMessage(null);
-  }, [selectedClassId]);
+  }
 
   const selectedClass = useMemo(() => {
-    return (classrooms || []).find((c) => c.id === selectedClassId) || classrooms?.[0] || null;
-  }, [classrooms, selectedClassId]);
+    return (classrooms || []).find((c) => c.id === effectiveClassId) || classrooms?.[0] || null;
+  }, [classrooms, effectiveClassId]);
 
   // Seçili sınıfın dersleri ve kota istatistikleri
   const classCourses = useMemo(() => {
@@ -89,24 +86,17 @@ export default function PrePinPanel() {
     });
   }, [selectedClass, pinnedSlots, teachers]);
 
-  // Seçili ders kotası dolarsa ilk uygun derse odaklan
-  useEffect(() => {
-    if (classCourses.length === 0) {
-      setSelectedSubject('');
-      return;
-    }
+  // Seçili ders kotası dolarsa ilk uygun derse odaklan (render sırasında senkronize et)
+  const effectiveSubject = useMemo(() => {
+    if (classCourses.length === 0) return '';
     const current = classCourses.find((c) => c.courseSubject === selectedSubject);
-    if (!current || current.isCompleted) {
-      const firstAvailable = classCourses.find((c) => !c.isCompleted);
-      if (firstAvailable) {
-        setSelectedSubject(firstAvailable.courseSubject);
-      }
-    }
+    if (current && !current.isCompleted) return selectedSubject;
+    return classCourses.find((c) => !c.isCompleted)?.courseSubject || selectedSubject;
   }, [classCourses, selectedSubject]);
 
   const activeCourse = useMemo(() => {
-    return classCourses.find((c) => c.courseSubject === selectedSubject) || null;
-  }, [classCourses, selectedSubject]);
+    return classCourses.find((c) => c.courseSubject === effectiveSubject) || null;
+  }, [classCourses, effectiveSubject]);
 
   // Bu sınıfa ait kilitli hücreler
   const currentClassPins = useMemo(() => {
@@ -233,7 +223,7 @@ export default function PrePinPanel() {
   const handleApplyBlockSuggestion = (suggestion = activeSuggestion) => {
     if (!suggestion) return;
 
-    const groupId = `grp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const groupId = createGroupId();
 
     // 1. İlk kilitlenen saate groupId ata
     const updatedPins = (pinnedSlots || []).map((p) => {
@@ -531,7 +521,7 @@ export default function PrePinPanel() {
           ) : (
             <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
               {classCourses.map((course) => {
-                const isSelected = course.courseSubject === selectedSubject;
+                const isSelected = course.courseSubject === effectiveSubject;
                 const isCompleted = course.isCompleted;
 
                 return (

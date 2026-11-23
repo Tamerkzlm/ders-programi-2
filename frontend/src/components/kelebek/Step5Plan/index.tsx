@@ -36,10 +36,11 @@ function openPrintWindow(html) {
 export default function Step5Plan({ plan, examInfo = {} as any, onBack, onRegenerate }: any) {
   const [activeRoom, setActiveRoom] = useState(0);
   const [localPlan, setLocalPlan] = useState(plan);
-
-  useEffect(() => {
+  const [prevPlan, setPrevPlan] = useState(plan);
+  if (plan !== prevPlan) {
+    setPrevPlan(plan);
     setLocalPlan(plan);
-  }, [plan]);
+  }
 
   if (!localPlan) return null;
 

@@ -5,7 +5,6 @@ import { useAppStore } from '../store/appStore';
 import { useCloudSyncStore } from '../services/cloudSyncService';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import { calculateTeacherDutyDay } from '../utils/dutyDayCalculator';
-import { QRCodeSVG } from '../utils/qrCodeGenerator';
 import {
   Calendar,
   GraduationCap,
@@ -17,7 +16,6 @@ import {
   Sparkles,
   Check,
   Printer,
-  QrCode,
   FileCheck,
   Loader2,
   AlertTriangle,
@@ -35,19 +33,22 @@ export default function MobileTeacherView() {
 
   // 🌐 URL'de :shareCode varsa Supabase RPC üzerinden şifresiz canlı veriyi çek
   useEffect(() => {
-    if (!paramShareCode) {
-      setLoadingRemote(false);
-      return;
-    }
+    if (!paramShareCode) return;
     if (!isSupabaseConfigured || !supabase) {
-      setRemoteError('Bulut bağlantısı yapılandırılmadığı için canlı paylaşım kodu okunamadı.');
-      setLoadingRemote(false);
+      queueMicrotask(() => {
+        setRemoteError('Bulut bağlantısı yapılandırılmadığı için canlı paylaşım kodu okunamadı.');
+        setLoadingRemote(false);
+      });
       return;
     }
 
     let cancelled = false;
-    setLoadingRemote(true);
-    setRemoteError('');
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setLoadingRemote(true);
+        setRemoteError('');
+      }
+    });
 
     supabase
       .rpc('get_published_school_by_share_code', { p_share_code: paramShareCode })
@@ -95,21 +96,21 @@ export default function MobileTeacherView() {
   const [activeDay, setActiveDay] = useState(getTodayDayName());
   const [selectedTeacherId, setSelectedTeacherId] = useState(paramTeacherId || teachers[0]?.id || '');
   const [copied, setCopied] = useState(false);
-  const [showQRModal, setShowQRModal] = useState(false);
 
-  // Uzaktan öğretmen listesi yüklendiğinde seçili öğretmeni senkronize et
-  useEffect(() => {
+  const effectiveTeacherId = useMemo(() => {
     if (paramTeacherId && teachers.some((t) => t.id === paramTeacherId)) {
-      setSelectedTeacherId(paramTeacherId);
-    } else if (!selectedTeacherId && teachers[0]?.id) {
-      setSelectedTeacherId(teachers[0].id);
+      return paramTeacherId;
     }
+    if (selectedTeacherId && teachers.some((t) => t.id === selectedTeacherId)) {
+      return selectedTeacherId;
+    }
+    return teachers[0]?.id || '';
   }, [teachers, paramTeacherId, selectedTeacherId]);
 
   // Aktif seçili öğretmen
   const currentTeacher = useMemo(() => {
-    return teachers.find((t) => t.id === selectedTeacherId) || teachers[0];
-  }, [teachers, selectedTeacherId]);
+    return teachers.find((t) => t.id === effectiveTeacherId) || teachers[0];
+  }, [teachers, effectiveTeacherId]);
 
   // Öğretmenin toplam yükü
   const teacherLoad = useMemo(() => {
@@ -262,15 +263,6 @@ export default function MobileTeacherView() {
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setShowQRModal(true)}
-              className="p-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-xs cursor-pointer flex items-center gap-1 text-xs font-bold"
-              title="Bu Programın QR Kodunu Aç"
-            >
-              <QrCode size={15} />
-              <span className="hidden sm:inline">QR Kod</span>
-            </button>
-            <button
-              type="button"
               onClick={handleCopyLink}
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition-all cursor-pointer"
               title="Bağlantıyı Kopyala"
@@ -289,7 +281,7 @@ export default function MobileTeacherView() {
             <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Öğretmen Seç / Değiştir:</span>
           </div>
           <select
-            value={selectedTeacherId}
+            value={effectiveTeacherId}
             onChange={(e) => handleTeacherChange(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 text-white font-bold text-xs rounded-xl p-2.5 outline-none focus:border-blue-500 cursor-pointer"
           >
@@ -315,15 +307,6 @@ export default function MobileTeacherView() {
                 <div className="text-xs text-slate-400 font-semibold mt-0.5 print:text-gray-600">
                   Haftalık Ders Yükü: <strong className="text-slate-200 print:text-black">{teacherLoad} Saat</strong>
                 </div>
-              </div>
-
-              {/* HIZLI QR KOD KÜÇÜK GÖSTERGE */}
-              <div
-                onClick={() => setShowQRModal(true)}
-                className="bg-white p-1.5 rounded-xl cursor-pointer hover:scale-105 transition-transform shadow-md print:hidden"
-                title="Büyütmek için tıklayın"
-              >
-                <QRCodeSVG value={currentUrl} size={50} />
               </div>
             </div>
 
@@ -510,41 +493,6 @@ export default function MobileTeacherView() {
           </button>
         </div>
       </div>
-
-      {/* 📱 QR KOD MODAL PENCERESİ */}
-      {showQRModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl animate-in zoom-in-95">
-            <div className="space-y-1">
-              <h3 className="font-black text-sm text-white uppercase tracking-wide">
-                Cep Telefonundan Görüntüle
-              </h3>
-              <p className="text-xs text-slate-400">
-                Kameranızı açarak bu QR kodu okutun. Program anında telefonunuzda açılacaktır.
-              </p>
-            </div>
-
-            <div className="bg-white p-4 rounded-3xl inline-block shadow-inner">
-              <QRCodeSVG value={currentUrl} size={180} />
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs font-black text-white">{currentTeacher?.name}</div>
-              <div className="text-[11px] text-blue-400 font-bold">
-                {dutyDay ? `Nöbet Günü: ${dutyDay}` : 'Ders Programı'}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShowQRModal(false)}
-              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-2.5 rounded-xl transition-all cursor-pointer"
-            >
-              Kapat
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

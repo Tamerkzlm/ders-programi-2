@@ -8,6 +8,7 @@ import type { CloudSyncState, PublishedMobilePayload, SupabaseUser } from '../ty
 // 🔒 Multi-Tab Senkronizasyon Kilidi
 // Aynı tarayıcıda birden fazla sekme açıldığında eşzamanlı bulut yazma çakışmasını önler.
 let _syncBroadcastChannel: BroadcastChannel | null = null;
+let _remoteSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
 const getSyncChannel = (): BroadcastChannel | null => {
   if (typeof BroadcastChannel === 'undefined') return null;
@@ -16,7 +17,17 @@ const getSyncChannel = (): BroadcastChannel | null => {
     _syncBroadcastChannel.onmessage = (e) => {
       if (e.data === 'sync_started') {
         isSyncInFlight = true;
+        if (_remoteSyncTimer) clearTimeout(_remoteSyncTimer);
+        // Diğer sekme çökse/kapansa bile kilidin sonsuza dek takılı kalmasını önle
+        _remoteSyncTimer = setTimeout(() => {
+          isSyncInFlight = false;
+          _remoteSyncTimer = null;
+        }, 30000);
       } else if (e.data === 'sync_done' || e.data === 'sync_failed') {
+        if (_remoteSyncTimer) {
+          clearTimeout(_remoteSyncTimer);
+          _remoteSyncTimer = null;
+        }
         isSyncInFlight = false;
       }
     };
